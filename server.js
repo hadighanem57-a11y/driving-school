@@ -10,6 +10,7 @@ const app = express();
 
 const allowedOrigins = [
   'https://driving-school-frontend-k6u2maqqj-hadighanem57-7353s-projects.vercel.app',
+  'https://driving-school-frontend-fgool63p9-hadighanem57-7353s-projects.vercel.app',
   'https://driving-school-frontend-iota.vercel.app',
   'https://driving-school-smoky.vercel.app',
   'http://localhost:3000',
@@ -25,6 +26,7 @@ function isAllowedOrigin(origin) {
 
 app.use(function (req, res, next) {
   var origin = req.headers.origin;
+
   if (isAllowedOrigin(origin)) {
     if (origin) res.header('Access-Control-Allow-Origin', origin);
     res.header('Vary', 'Origin');
@@ -32,7 +34,11 @@ app.use(function (req, res, next) {
     res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   }
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+
   next();
 });
 
@@ -62,18 +68,35 @@ app.use(function (err, req, res, next) {
 
 async function seedAdmin() {
   try {
-    if (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD) return;
-    var exists = await User.findOne({ role: 'superadmin' });
-    if (!exists) {
-      var hashed = await bcrypt.hash(process.env.ADMIN_PASSWORD, 10);
-      await User.create({
+    if (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD) {
+      console.log('ADMIN_EMAIL or ADMIN_PASSWORD missing');
+      return;
+    }
+
+    const email = String(process.env.ADMIN_EMAIL).trim().toLowerCase();
+    const hashed = await bcrypt.hash(process.env.ADMIN_PASSWORD, 10);
+
+    let admin = await User.findOne({ role: 'superadmin' });
+
+    if (!admin) {
+      admin = await User.create({
         fullName: 'Super Admin',
-        email: process.env.ADMIN_EMAIL,
+        email: email,
         password: hashed,
         role: 'superadmin',
         isActive: true
       });
-      console.log('Super Admin created');
+
+      console.log('Super Admin created: ' + email);
+    } else {
+      admin.fullName = 'Super Admin';
+      admin.email = email;
+      admin.password = hashed;
+      admin.role = 'superadmin';
+      admin.isActive = true;
+      await admin.save();
+
+      console.log('Super Admin synced: ' + email);
     }
   } catch (e) {
     console.log('Seed error:', e.message);
@@ -84,6 +107,7 @@ mongoose.connect(process.env.MONGODB_URI)
   .then(async function () {
     console.log('MongoDB Connected');
     await seedAdmin();
+
     var PORT = process.env.PORT || 5000;
     app.listen(PORT, function () {
       console.log('Server running on port ' + PORT);
