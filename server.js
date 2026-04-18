@@ -11,7 +11,11 @@ const app = express();
 
 // Middleware
 app.use(cors({
-  origin: "https://driving-school-1xredkmw5-hadighanem57-7353s-projects.vercel.app", // رابط Vercel تبعك
+  origin: [
+    "https://driving-school-frontend-iota.vercel.app",
+    "https://driving-school-smoky.vercel.app",
+    "http://localhost:3000"
+  ],
   credentials: true
 }));
 
