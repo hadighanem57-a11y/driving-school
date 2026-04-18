@@ -108,6 +108,25 @@ mongoose.connect(process.env.MONGODB_URI)
     console.log('MongoDB Connected');
     await seedAdmin();
 
+    try {
+      var usersCollection = mongoose.connection.db.collection('users');
+      var indexes = await usersCollection.indexes();
+      console.log('USERS INDEXES:', indexes.map(function(i) { return i.name; }));
+
+      var hasUsernameIndex = indexes.some(function(i) {
+        return i.name === 'username_1';
+      });
+
+      if (hasUsernameIndex) {
+        await usersCollection.dropIndex('username_1');
+        console.log('Dropped old username_1 index');
+      } else {
+        console.log('No username_1 index found');
+      }
+    } catch (e) {
+      console.log('Index cleanup error:', e.message);
+    }
+
     var PORT = process.env.PORT || 5000;
     app.listen(PORT, function () {
       console.log('Server running on port ' + PORT);
