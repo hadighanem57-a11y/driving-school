@@ -8,21 +8,21 @@ const { auth, authorize } = require('../middleware/auth');
 // Create school
 router.post('/create-school', auth, authorize('superadmin', 'admin'), async function(req, res) {
   try {
-    var schoolName = req.body.schoolName;
-    var licenseNumber = req.body.licenseNumber;
-    var phone = req.body.phone;
-    var address = req.body.address;
-    var email = req.body.email;
-    var password = req.body.password;
-   var t = translations[ctx.lang]; //
-   
+    const schoolName = req.body.schoolName;
+    const licenseNumber = req.body.licenseNumber;
+    const phone = req.body.phone;
+    const address = req.body.address;
+    const email = req.body.email;
+    const password = req.body.password;
+    // var t = translations[ctx.lang]; // ← تم الحذف: ctx و translations غير معرفين
+
     if (!schoolName || !licenseNumber || !phone || !address || !email || !password) {
       return res.status(400).json({
         message: 'ALL fields are required: School Name, License Number, Phone, Address, Email, Password'
       });
     }
 
-    var exists = await User.findOne({
+    const exists = await User.findOne({
       $or: [
         { email: email },
         { licenseNumber: licenseNumber }
@@ -33,9 +33,9 @@ router.post('/create-school', auth, authorize('superadmin', 'admin'), async func
       return res.status(400).json({ message: 'Email or License already exists' });
     }
 
-    var hashed = await bcrypt.hash(password, 10);
+    const hashed = await bcrypt.hash(password, 10);
 
-    var school = await User.create({
+    const school = await User.create({
       fullName: schoolName,
       schoolName: schoolName,
       licenseNumber: licenseNumber,
@@ -64,7 +64,7 @@ router.post('/create-school', auth, authorize('superadmin', 'admin'), async func
 // Get all schools
 router.get('/schools', auth, authorize('superadmin', 'admin'), async function(req, res) {
   try {
-    var schools = await User.find({ role: 'school' })
+    const schools = await User.find({ role: 'school' })
       .select('-password')
       .sort({ createdAt: -1 });
 
@@ -82,12 +82,12 @@ router.post('/create-admin', auth, authorize('superadmin'), async function(req, 
       return res.status(400).json({ message: 'fullName, email, password required' });
     }
 
-    var exists = await User.findOne({ email: req.body.email });
+    const exists = await User.findOne({ email: req.body.email });
     if (exists) {
       return res.status(400).json({ message: 'Email exists' });
     }
 
-    var hashed = await bcrypt.hash(req.body.password, 10);
+    const hashed = await bcrypt.hash(req.body.password, 10);
 
     await User.create({
       fullName: req.body.fullName,
@@ -112,7 +112,7 @@ router.put('/toggle-school/:id', auth, authorize('superadmin'), async function(r
       return res.status(400).json({ message: 'Invalid school ID' });
     }
 
-    var school = await User.findById(req.params.id);
+    const school = await User.findById(req.params.id);
     if (!school) {
       return res.status(404).json({ message: 'Not found' });
     }
@@ -153,7 +153,7 @@ router.put('/school/:id', auth, authorize('superadmin', 'admin'), async function
       return res.status(400).json({ message: 'Invalid school ID' });
     }
 
-    var update = {};
+    const update = {};
 
     if (req.body.schoolName) {
       update.schoolName = req.body.schoolName;
@@ -163,7 +163,7 @@ router.put('/school/:id', auth, authorize('superadmin', 'admin'), async function
     if (req.body.address) update.address = req.body.address;
     if (req.body.licenseNumber) update.licenseNumber = req.body.licenseNumber;
 
-    var school = await User.findByIdAndUpdate(req.params.id, update, { new: true })
+    const school = await User.findByIdAndUpdate(req.params.id, update, { new: true })
       .select('-password');
 
     if (!school) {
@@ -188,7 +188,7 @@ router.put('/school-password/:id', auth, authorize('superadmin', 'admin'), async
       return res.status(400).json({ message: 'Password required' });
     }
 
-    var hashed = await bcrypt.hash(req.body.newPassword, 10);
+    const hashed = await bcrypt.hash(req.body.newPassword, 10);
     await User.findByIdAndUpdate(req.params.id, { password: hashed });
 
     res.json({ message: 'Password changed' });

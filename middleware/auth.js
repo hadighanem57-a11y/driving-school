@@ -3,21 +3,44 @@ const User = require('../models/User');
 
 const auth = async (req, res, next) => {
   try {
+    // مهم: ما نوقف طلبات الـ OPTIONS تبع الـ CORS preflight
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
+
     console.log('--- AUTH START ---');
+    console.log('Method:', req.method);
+    console.log('Path:', req.originalUrl);
     console.log('Authorization header:', req.header('Authorization') || 'MISSING');
 
-    const token = req.header('Authorization');
+    const authHeader = req.header('Authorization');
 
-    if (!token) {
-      console.log('No token received');
+    if (!authHeader) {
+      console.log('No Authorization header received');
       return res.status(401).json({ message: 'No token' });
     }
 
-    const clean = token.replace('Bearer ', '');
+    if (!authHeader.startsWith('Bearer ')) {
+      console.log('Authorization header is not Bearer token');
+      return res.status(401).json({ message: 'Invalid token format' });
+    }
+
+    const token = authHeader.replace('Bearer ', '').trim();
+
+    if (!token) {
+      console.log('Bearer token is empty');
+      return res.status(401).json({ message: 'No token' });
+    }
+
     console.log('Token extracted successfully');
     console.log('JWT_SECRET exists:', !!process.env.JWT_SECRET);
 
-    const decoded = jwt.verify(clean, process.env.JWT_SECRET);
+    if (!process.env.JWT_SECRET) {
+      console.log('JWT_SECRET is missing from environment variables');
+      return res.status(500).json({ message: 'Server configuration error' });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     console.log('Decoded token:', decoded);
 
     const user = await User.findById(decoded.id).select('-password');
@@ -41,16 +64,13 @@ const auth = async (req, res, next) => {
   } catch (err) {
     console.log('AUTH ERROR:', err.message);
     return res.status(401).json({
-      message: 'Invalid token',
-      error: err.message
+      message: 'Invalid token'
     });
   }
 };
 
-const authorize = function() {
-  var roles = Array.prototype.slice.call(arguments);
-
-  return function(req, res, next) {
+const authorize = (...roles) => {
+  return (req, res, next) => {
     console.log('--- AUTHORIZE START ---');
     console.log('User role:', req.user ? req.user.role : 'NO USER');
     console.log('Allowed roles:', roles);
