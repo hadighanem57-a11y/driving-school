@@ -425,5 +425,149 @@ router.delete('/:id', auth, authorize('admin', 'superadmin'), async function(req
     res.status(500).json({ message: err.message });
   }
 });
+// ✅ AUTO-LINK: Upload images + match using CSV mapping
+router.post('/upload-images-csv-match', auth, authorize('admin', 'superadmin'), imageUpload.fields([
+  { name: 'csv', maxCount: 1 },
+  { name: 'images', maxCount: 500 }
+]), async function(req, res) {
+  try {
+    // Check files
+    if (!req.files || !req.files.csv || !req.files.csv[0]) {
+      return res.status(400).json({ message: 'CSV file required' });
+    }
+    if (!req.files.images || req.files.images.length === 0) {
+      return res.status(400).json({ message: 'No images uploaded' });
+    }
 
+    // Parse CSV
+    var csvContent = fs.readFileSync(req.files.csv[0].path, 'utf8');
+    var records = parse(csvContent, {
+      columns: true,
+      skip_empty_lines: true,
+      bom: true,
+      relax_quotes: true,
+      relax_column_count: true,
+      trim: true
+    });
+
+    console.log('=== CSV-MATCH START === CSV rows:', records.length, 'Images:', req.files.images.length);
+
+    // Build mapping: imageFileName -> setNumber
+    // CSV has: SetNumber=1234, ImagePath=C:\...\1.jpg
+    // So we extract "1" from ImagePath, and map it to setNumber 1234
+    var imageToSetNumber = {};
+    for (var i = 0; i < records.length; i++) {
+      var row = records[i];
+      var setNum = parseInt(clean(row.SetNumber || row.Id || 0), 10);
+      var imgPath = clean(row.ImagePath);
+
+      if (!setNum || !imgPath) continue;
+
+      // Extract filename without extension from ImagePath
+      // "C:\Program Files\DrivingSchool\signs\1.jpg" -> "1"
+      var fileName = imgPath.replace(/\\/g, '/').split('/').pop();
+      var baseName = fileName.split('.')[0];
+
+      if (baseName) {
+        imageToSetNumber[baseName] = setNum;
+        console.log('MAP:', baseName, '->', setNum);
+      }
+    }
+
+    console.log('MAPPING:', JSON.stringify(imageToSetNumber));
+
+    // Process each uploaded image
+    var matched = 0;
+    var notFound = 0;
+    var failed = 0;
+    var results = [];
+
+    for (var j = 0; j < req.files.images.length; j++) {
+      var file = req.files.images[j];
+
+      try {
+        // Get base name of uploaded file: "1.jpg" -> "1"
+        var uploadedBaseName = path.parse(file.originalname).name;
+
+        // Look up setNumber from CSV mapping
+        var setNumber = imageToSetNumber[uploadedBaseName];
+
+        if (!setNumber) {
+          console.log('SKIP (no mapping):', file.originalname);
+          results.push({
+            name: file.originalname,
+            status: 'no_mapping',
+            reason: 'No CSV mapping for filename ' + uploadedBaseName
+          });
+          cleanupTemp(file.path);
+          notFound++;
+          continue;
+        }
+
+        // Find question
+        var question = await Question.findOne({ setNumber: setNumber });
+
+        if (!question) {
+          console.log('SKIP (no question):', uploadedBaseName, '-> setNumber', setNumber);
+          results.push({
+            name: file.originalname,
+            status: 'not_found',
+            reason: 'No question with setNumber ' + setNumber
+          });
+          cleanupTemp(file.path);
+          notFound++;
+          continue;
+        }
+
+        // Upload to ImgBB
+        var imageUrl = await uploadToImgBB(file);
+
+        // Update question
+        await Question.findByIdAndUpdate(question._id, { imagePath: imageUrl });
+
+        console.log('MATCHED:', file.originalname, '-> Q#' + setNumber, '->', imageUrl);
+        results.push({
+          name: file.originalname,
+          status: 'matched',
+          setNumber: setNumber,
+          url: imageUrl
+        });
+        matched++;
+
+      } catch (uploadErr) {
+        console.log('ERROR:', file.originalname, uploadErr.message);
+        results.push({
+          name: file.originalname,
+          status: 'error',
+          reason: uploadErr.message
+        });
+        failed++;
+      }
+
+      cleanupTemp(file.path);
+    }
+
+    // Cleanup CSV temp
+    cleanupTemp(req.files.csv[0].path);
+
+    console.log('=== CSV-MATCH DONE === Matched:', matched, 'NotFound:', notFound, 'Failed:', failed);
+
+    res.json({
+      message: matched + ' matched, ' + notFound + ' not found, ' + failed + ' failed',
+      matched: matched,
+      notFound: notFound,
+      failed: failed,
+      results: results
+    });
+
+  } catch (err) {
+    // Cleanup all temp files
+    if (req.files) {
+      if (req.files.csv) req.files.csv.forEach(function(f) { cleanupTemp(f.path); });
+      if (req.files.images) req.files.images.forEach(function(f) { cleanupTemp(f.path); });
+    }
+    console.log('CSV-MATCH ERROR:', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
 module.exports = router;
