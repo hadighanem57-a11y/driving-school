@@ -352,5 +352,15 @@ router.post('/upload-images', auth, authorize('admin', 'superadmin'), imageUploa
     res.status(500).json({ message: err.message });
   }
 });
-
+// ✅ DELETE ALL QUESTIONS
+router.delete('/delete-all', auth, authorize('superadmin'), async function(req, res) {
+  try {
+    var result = await Question.deleteMany({});
+    console.log('DELETED ALL QUESTIONS:', result.deletedCount);
+    res.json({ message: 'Deleted ' + result.deletedCount + ' questions' });
+  } catch (err) {
+    console.log('DELETE ALL ERROR:', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
 module.exports = router;
