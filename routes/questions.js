@@ -84,7 +84,7 @@ function normalizeBool(val) {
 }
 
 // ============================================
-// ✅ SPECIFIC ROUTES FIRST (قبل /:id)
+// ✅ SPECIFIC ROUTES FIRST
 // ============================================
 
 // ✅ IMPORT CSV
@@ -157,6 +157,7 @@ router.post('/import', auth, authorize('admin', 'superadmin'), upload.single('fi
         };
 
         var existing = await Question.findOne({ setNumber: setNumber });
+
         if (existing) {
           await Question.findByIdAndUpdate(existing._id, questionData);
           updated++;
@@ -170,6 +171,7 @@ router.post('/import', auth, authorize('admin', 'superadmin'), upload.single('fi
     }
 
     cleanupTemp(req.file.path);
+
     console.log('Imported:', imported, 'Updated:', updated);
 
     return res.json({
@@ -208,15 +210,17 @@ router.get('/stats', auth, authorize('admin', 'superadmin'), async function(req,
       },
       { $sort: { '_id.category': 1 } }
     ]);
+
     var total = await Question.countDocuments();
     var active = await Question.countDocuments({ isActive: true });
+
     res.json({ stats: stats, total: total, active: active });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// ✅ DELETE ALL QUESTIONS - لازم قبل /:id
+// ✅ DELETE ALL QUESTIONS
 router.delete('/delete-all', auth, authorize('superadmin'), async function(req, res) {
   try {
     var result = await Question.deleteMany({});
@@ -236,7 +240,9 @@ router.post('/upload-image', auth, authorize('admin', 'superadmin'), imageUpload
     }
 
     console.log('UPLOADING IMAGE TO IMGBB:', req.file.originalname);
+
     var imagePath = await uploadToImgBB(req.file);
+
     console.log('IMGBB URL:', imagePath);
 
     if (req.body.questionId) {
@@ -245,6 +251,7 @@ router.post('/upload-image', auth, authorize('admin', 'superadmin'), imageUpload
     }
 
     cleanupTemp(req.file.path);
+
     res.json({ imagePath: imagePath });
   } catch (err) {
     cleanupTemp(req.file && req.file.path);
@@ -253,7 +260,7 @@ router.post('/upload-image', auth, authorize('admin', 'superadmin'), imageUpload
   }
 });
 
-// ✅ UPLOAD MANY IMAGES
+// ✅ UPLOAD MANY IMAGES - SIMPLE
 router.post('/upload-images', auth, authorize('admin', 'superadmin'), imageUpload.array('images', 500), async function(req, res) {
   try {
     if (!req.files || req.files.length === 0) {
@@ -266,14 +273,25 @@ router.post('/upload-images', auth, authorize('admin', 'superadmin'), imageUploa
 
     for (var i = 0; i < req.files.length; i++) {
       var file = req.files[i];
+
       try {
         var imageUrl = await uploadToImgBB(file);
-        files.push({ name: file.originalname, path: imageUrl });
+
+        files.push({
+          name: file.originalname,
+          path: imageUrl
+        });
+
         console.log('UPLOADED:', file.originalname, '->', imageUrl);
       } catch (uploadErr) {
         console.log('FAILED TO UPLOAD:', file.originalname, uploadErr.message);
-        files.push({ name: file.originalname, path: '', error: uploadErr.message });
+        files.push({
+          name: file.originalname,
+          path: '',
+          error: uploadErr.message
+        });
       }
+
       cleanupTemp(file.path);
     }
 
@@ -283,14 +301,16 @@ router.post('/upload-images', auth, authorize('admin', 'superadmin'), imageUploa
     });
   } catch (err) {
     if (req.files && req.files.length) {
-      req.files.forEach(function(file) { cleanupTemp(file.path); });
+      req.files.forEach(function(file) {
+        cleanupTemp(file.path);
+      });
     }
     console.log('UPLOAD MANY IMAGES ERROR:', err.message);
     res.status(500).json({ message: err.message });
   }
 });
 
-// ✅ UPLOAD IMAGES + AUTO-MATCH BY FILENAME = SET NUMBER
+// ✅ AUTO-MATCH BY FILENAME = SET NUMBER
 router.post('/upload-images-auto', auth, authorize('admin', 'superadmin'), imageUpload.array('images', 500), async function(req, res) {
   try {
     if (!req.files || req.files.length === 0) {
@@ -306,6 +326,7 @@ router.post('/upload-images-auto', auth, authorize('admin', 'superadmin'), image
 
     for (var i = 0; i < req.files.length; i++) {
       var file = req.files[i];
+
       try {
         var nameOnly = path.parse(file.originalname).name;
         var setNumber = parseInt(nameOnly, 10);
@@ -329,6 +350,7 @@ router.post('/upload-images-auto', auth, authorize('admin', 'superadmin'), image
         }
 
         var imageUrl = await uploadToImgBB(file);
+
         await Question.findByIdAndUpdate(question._id, { imagePath: imageUrl });
 
         console.log('MATCHED:', file.originalname, '-> Q#' + setNumber, '->', imageUrl);
@@ -356,22 +378,178 @@ router.post('/upload-images-auto', auth, authorize('admin', 'superadmin'), image
 
   } catch (err) {
     if (req.files && req.files.length) {
-      req.files.forEach(function(file) { cleanupTemp(file.path); });
+      req.files.forEach(function(file) {
+        cleanupTemp(file.path);
+      });
     }
     console.log('AUTO UPLOAD ERROR:', err.message);
     res.status(500).json({ message: err.message });
   }
 });
 
-// ✅ GET ALL WITH FILTERS - قبل /:id
+// ✅ UPLOAD IMAGES + MATCH USING CSV IMAGEPATH
+router.post('/upload-images-csv-match', auth, authorize('admin', 'superadmin'), imageUpload.fields([
+  { name: 'csv', maxCount: 1 },
+  { name: 'images', maxCount: 500 }
+]), async function(req, res) {
+  try {
+    if (!req.files || !req.files.csv || !req.files.csv[0]) {
+      return res.status(400).json({ message: 'CSV file required' });
+    }
+
+    if (!req.files.images || req.files.images.length === 0) {
+      return res.status(400).json({ message: 'No images uploaded' });
+    }
+
+    var csvFile = req.files.csv[0];
+    var images = req.files.images;
+
+    var csvContent = fs.readFileSync(csvFile.path, 'utf8');
+    var records = parse(csvContent, {
+      columns: true,
+      skip_empty_lines: true,
+      bom: true,
+      relax_quotes: true,
+      relax_column_count: true,
+      trim: true
+    });
+
+    console.log('=== CSV MATCH START === rows:', records.length, 'images:', images.length);
+
+    // Build mapping from image filename -> setNumber
+    // Example:
+    // SetNumber = 1234
+    // ImagePath = C:\Program Files\DrivingSchool\signs\1.jpg
+    // So:
+    // 1 -> 1234
+    var imageMap = {};
+
+    for (var i = 0; i < records.length; i++) {
+      var row = records[i];
+
+      var setNumber = parseInt(clean(row.SetNumber || row.Id || 0), 10);
+      var imagePath = clean(row.ImagePath);
+
+      if (!setNumber || !imagePath) continue;
+
+      var normalizedPath = imagePath.replace(/\\/g, '/');
+      var fileName = normalizedPath.split('/').pop(); // 1.jpg
+      var baseName = fileName ? fileName.split('.')[0] : ''; // 1
+
+      if (baseName) {
+        imageMap[baseName] = setNumber;
+      }
+    }
+
+    console.log('CSV IMAGE MAP COUNT:', Object.keys(imageMap).length);
+
+    var matched = 0;
+    var notFound = 0;
+    var failed = 0;
+    var results = [];
+
+    for (var j = 0; j < images.length; j++) {
+      var file = images[j];
+
+      try {
+        var uploadedBaseName = path.parse(file.originalname).name; // 1 from 1.jpg
+        var mappedSetNumber = imageMap[uploadedBaseName];
+
+        if (!mappedSetNumber) {
+          console.log('NO CSV MAPPING FOR:', file.originalname);
+          results.push({
+            name: file.originalname,
+            status: 'no_mapping',
+            reason: 'No CSV mapping found for filename ' + uploadedBaseName
+          });
+          cleanupTemp(file.path);
+          notFound++;
+          continue;
+        }
+
+        var question = await Question.findOne({ setNumber: mappedSetNumber });
+
+        if (!question) {
+          console.log('QUESTION NOT FOUND FOR SET NUMBER:', mappedSetNumber);
+          results.push({
+            name: file.originalname,
+            status: 'not_found',
+            setNumber: mappedSetNumber,
+            reason: 'No question with setNumber ' + mappedSetNumber
+          });
+          cleanupTemp(file.path);
+          notFound++;
+          continue;
+        }
+
+        var imageUrl = await uploadToImgBB(file);
+
+        await Question.findByIdAndUpdate(question._id, { imagePath: imageUrl });
+
+        console.log('CSV MATCHED:', file.originalname, '-> setNumber', mappedSetNumber, '->', imageUrl);
+
+        results.push({
+          name: file.originalname,
+          status: 'matched',
+          setNumber: mappedSetNumber,
+          url: imageUrl
+        });
+        matched++;
+      } catch (uploadErr) {
+        console.log('CSV MATCH ERROR:', file.originalname, uploadErr.message);
+        results.push({
+          name: file.originalname,
+          status: 'error',
+          reason: uploadErr.message
+        });
+        failed++;
+      }
+
+      cleanupTemp(file.path);
+    }
+
+    cleanupTemp(csvFile.path);
+
+    console.log('=== CSV MATCH DONE === matched:', matched, 'notFound:', notFound, 'failed:', failed);
+
+    res.json({
+      message: matched + ' images matched, ' + notFound + ' not found, ' + failed + ' failed',
+      matched: matched,
+      notFound: notFound,
+      failed: failed,
+      results: results
+    });
+  } catch (err) {
+    if (req.files) {
+      if (req.files.csv) {
+        req.files.csv.forEach(function(file) {
+          cleanupTemp(file.path);
+        });
+      }
+      if (req.files.images) {
+        req.files.images.forEach(function(file) {
+          cleanupTemp(file.path);
+        });
+      }
+    }
+
+    console.log('CSV MATCH ERROR:', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ✅ GET ALL WITH FILTERS
 router.get('/', auth, async function(req, res) {
   try {
     var filter = {};
+
     if (req.query.category) filter.category = req.query.category;
     if (req.query.questionCategory) filter.questionCategory = req.query.questionCategory;
+
     if (req.query.isActive !== undefined && req.query.isActive !== '') {
       filter.isActive = req.query.isActive === 'true';
     }
+
     if (req.query.search) {
       filter.$or = [
         { 'questionText.English': { $regex: req.query.search, $options: 'i' } },
@@ -379,14 +557,22 @@ router.get('/', auth, async function(req, res) {
         { 'questionText.French': { $regex: req.query.search, $options: 'i' } }
       ];
     }
+
     var page = parseInt(req.query.page || '1', 10);
     var limit = parseInt(req.query.limit || '50', 10);
+
     var total = await Question.countDocuments(filter);
+
     var questions = await Question.find(filter)
       .skip((page - 1) * limit)
       .limit(limit)
       .sort({ setNumber: 1 });
-    res.json({ questions: questions, total: total, pages: Math.ceil(total / limit) });
+
+    res.json({
+      questions: questions,
+      total: total,
+      pages: Math.ceil(total / limit)
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -403,7 +589,7 @@ router.post('/', auth, authorize('admin', 'superadmin'), async function(req, res
 });
 
 // ============================================
-// ✅ DYNAMIC ROUTES LAST (/:id دايمًا بالآخر)
+// ✅ DYNAMIC ROUTES LAST
 // ============================================
 
 // ✅ EDIT
@@ -425,149 +611,5 @@ router.delete('/:id', auth, authorize('admin', 'superadmin'), async function(req
     res.status(500).json({ message: err.message });
   }
 });
-// ✅ AUTO-LINK: Upload images + match using CSV mapping
-router.post('/upload-images-csv-match', auth, authorize('admin', 'superadmin'), imageUpload.fields([
-  { name: 'csv', maxCount: 1 },
-  { name: 'images', maxCount: 500 }
-]), async function(req, res) {
-  try {
-    // Check files
-    if (!req.files || !req.files.csv || !req.files.csv[0]) {
-      return res.status(400).json({ message: 'CSV file required' });
-    }
-    if (!req.files.images || req.files.images.length === 0) {
-      return res.status(400).json({ message: 'No images uploaded' });
-    }
 
-    // Parse CSV
-    var csvContent = fs.readFileSync(req.files.csv[0].path, 'utf8');
-    var records = parse(csvContent, {
-      columns: true,
-      skip_empty_lines: true,
-      bom: true,
-      relax_quotes: true,
-      relax_column_count: true,
-      trim: true
-    });
-
-    console.log('=== CSV-MATCH START === CSV rows:', records.length, 'Images:', req.files.images.length);
-
-    // Build mapping: imageFileName -> setNumber
-    // CSV has: SetNumber=1234, ImagePath=C:\...\1.jpg
-    // So we extract "1" from ImagePath, and map it to setNumber 1234
-    var imageToSetNumber = {};
-    for (var i = 0; i < records.length; i++) {
-      var row = records[i];
-      var setNum = parseInt(clean(row.SetNumber || row.Id || 0), 10);
-      var imgPath = clean(row.ImagePath);
-
-      if (!setNum || !imgPath) continue;
-
-      // Extract filename without extension from ImagePath
-      // "C:\Program Files\DrivingSchool\signs\1.jpg" -> "1"
-      var fileName = imgPath.replace(/\\/g, '/').split('/').pop();
-      var baseName = fileName.split('.')[0];
-
-      if (baseName) {
-        imageToSetNumber[baseName] = setNum;
-        console.log('MAP:', baseName, '->', setNum);
-      }
-    }
-
-    console.log('MAPPING:', JSON.stringify(imageToSetNumber));
-
-    // Process each uploaded image
-    var matched = 0;
-    var notFound = 0;
-    var failed = 0;
-    var results = [];
-
-    for (var j = 0; j < req.files.images.length; j++) {
-      var file = req.files.images[j];
-
-      try {
-        // Get base name of uploaded file: "1.jpg" -> "1"
-        var uploadedBaseName = path.parse(file.originalname).name;
-
-        // Look up setNumber from CSV mapping
-        var setNumber = imageToSetNumber[uploadedBaseName];
-
-        if (!setNumber) {
-          console.log('SKIP (no mapping):', file.originalname);
-          results.push({
-            name: file.originalname,
-            status: 'no_mapping',
-            reason: 'No CSV mapping for filename ' + uploadedBaseName
-          });
-          cleanupTemp(file.path);
-          notFound++;
-          continue;
-        }
-
-        // Find question
-        var question = await Question.findOne({ setNumber: setNumber });
-
-        if (!question) {
-          console.log('SKIP (no question):', uploadedBaseName, '-> setNumber', setNumber);
-          results.push({
-            name: file.originalname,
-            status: 'not_found',
-            reason: 'No question with setNumber ' + setNumber
-          });
-          cleanupTemp(file.path);
-          notFound++;
-          continue;
-        }
-
-        // Upload to ImgBB
-        var imageUrl = await uploadToImgBB(file);
-
-        // Update question
-        await Question.findByIdAndUpdate(question._id, { imagePath: imageUrl });
-
-        console.log('MATCHED:', file.originalname, '-> Q#' + setNumber, '->', imageUrl);
-        results.push({
-          name: file.originalname,
-          status: 'matched',
-          setNumber: setNumber,
-          url: imageUrl
-        });
-        matched++;
-
-      } catch (uploadErr) {
-        console.log('ERROR:', file.originalname, uploadErr.message);
-        results.push({
-          name: file.originalname,
-          status: 'error',
-          reason: uploadErr.message
-        });
-        failed++;
-      }
-
-      cleanupTemp(file.path);
-    }
-
-    // Cleanup CSV temp
-    cleanupTemp(req.files.csv[0].path);
-
-    console.log('=== CSV-MATCH DONE === Matched:', matched, 'NotFound:', notFound, 'Failed:', failed);
-
-    res.json({
-      message: matched + ' matched, ' + notFound + ' not found, ' + failed + ' failed',
-      matched: matched,
-      notFound: notFound,
-      failed: failed,
-      results: results
-    });
-
-  } catch (err) {
-    // Cleanup all temp files
-    if (req.files) {
-      if (req.files.csv) req.files.csv.forEach(function(f) { cleanupTemp(f.path); });
-      if (req.files.images) req.files.images.forEach(function(f) { cleanupTemp(f.path); });
-    }
-    console.log('CSV-MATCH ERROR:', err.message);
-    res.status(500).json({ message: err.message });
-  }
-});
 module.exports = router;
