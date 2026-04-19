@@ -26,6 +26,27 @@ function formatTimeAr(date) {
   return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ' ' + period;
 }
 
+function hasArabic(text) {
+  return /[\u0600-\u06FF]/.test(String(text || ''));
+}
+
+// منقلب ترتيب الكلمات فقط، مش الحروف
+function rtlText(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .reverse()
+    .join(' ');
+}
+
+function prepareArabicValue(value) {
+  if (value === null || value === undefined) return '';
+  var txt = String(value);
+  return hasArabic(txt) ? rtlText(txt) : txt;
+}
+
 function setupFonts(doc) {
   var regularPath = path.join(__dirname, '..', 'fonts', 'Amiri-Regular.ttf');
   var boldPath = path.join(__dirname, '..', 'fonts', 'Amiri-Bold.ttf');
@@ -49,16 +70,13 @@ function setupFonts(doc) {
   };
 }
 
-function isLatinLike(text) {
-  if (!text) return true;
-  return /^[A-Za-z0-9\s@._\-+\/\\|():,%#]*$/.test(String(text));
-}
-
 function drawArabicField(doc, y, label, value, options) {
   options = options || {};
 
-  var labelX = options.labelX || 340;
-  var labelW = options.labelW || 205;
+  var labelX = options.labelX || 335;
+  var labelW = options.labelW || 210;
+  var colonX = options.colonX || 323;
+  var colonW = options.colonW || 8;
   var valueX = options.valueX || 55;
   var valueW = options.valueW || 255;
   var labelFont = options.labelFont || 'ArabicBold';
@@ -66,27 +84,44 @@ function drawArabicField(doc, y, label, value, options) {
   var labelSize = options.labelSize || 11;
   var valueSize = options.valueSize || 11;
   var color = options.color || '#000';
-  var valueAlign = options.valueAlign || (isLatinLike(value) ? 'left' : 'right');
+
+  var rawValue = value === null || value === undefined ? '' : String(value);
+  var shownValue = prepareArabicValue(rawValue);
+
+  var valueAlign = options.valueAlign;
+  if (!valueAlign) {
+    valueAlign = hasArabic(rawValue) ? 'right' : 'left';
+  }
 
   doc.fillColor(color);
 
-  doc.font(valueFont).fontSize(valueSize).text(
-    String(value || ''),
-    valueX,
-    y,
-    {
-      width: valueW,
-      align: valueAlign
-    }
-  );
-
   doc.font(labelFont).fontSize(labelSize).text(
-    label + ':',
+    rtlText(label),
     labelX,
     y,
     {
       width: labelW,
       align: 'right'
+    }
+  );
+
+  doc.font(labelFont).fontSize(labelSize).text(
+    ':',
+    colonX,
+    y,
+    {
+      width: colonW,
+      align: 'center'
+    }
+  );
+
+  doc.font(valueFont).fontSize(valueSize).text(
+    shownValue,
+    valueX,
+    y,
+    {
+      width: valueW,
+      align: valueAlign
     }
   );
 }
@@ -119,13 +154,11 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
 
     console.log('Using fonts:', fontR, fontB, 'Arabic:', fonts.hasArabic);
 
-    // ============================================
     // HEADER
-    // ============================================
     doc.fontSize(22).font(fontB).fillColor('#111');
 
     if (fonts.hasArabic) {
-      doc.text('تقرير نتائج الامتحان', { align: 'center' });
+      doc.text(rtlText('تقرير نتائج الامتحان'), { align: 'center' });
     } else {
       doc.text('EXAM RESULTS REPORT', { align: 'center' });
     }
@@ -133,7 +166,10 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
     doc.moveDown(0.4);
 
     if (school) {
-      doc.fontSize(16).font(fontB).fillColor('#111').text(school.schoolName || '', { align: 'center' });
+      doc.fontSize(16).font(fontB).fillColor('#111').text(
+        prepareArabicValue(school.schoolName || ''),
+        { align: 'center' }
+      );
       doc.moveDown(0.4);
 
       if (fonts.hasArabic) {
@@ -144,20 +180,20 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
           valueFont: fontR,
           valueAlign: 'left'
         });
-        schoolY += 16;
+        schoolY += 17;
 
         drawArabicField(doc, schoolY, 'الهاتف', school.phone || '', {
           labelFont: fontB,
           valueFont: fontR,
           valueAlign: 'left'
         });
-        schoolY += 16;
+        schoolY += 17;
 
         drawArabicField(doc, schoolY, 'العنوان', school.address || '', {
           labelFont: fontB,
           valueFont: fontR
         });
-        schoolY += 18;
+        schoolY += 20;
 
         doc.y = schoolY;
       } else {
@@ -171,13 +207,11 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
     doc.moveTo(40, doc.y).lineTo(555, doc.y).lineWidth(2).stroke('#333');
     doc.moveDown(0.6);
 
-    // ============================================
     // STUDENT INFO
-    // ============================================
     doc.fontSize(14).font(fontB).fillColor('#111');
 
     if (fonts.hasArabic) {
-      doc.text('معلومات الطالب', { align: 'right' });
+      doc.text(rtlText('معلومات الطالب'), { align: 'right' });
       doc.moveDown(0.3);
 
       var infoY = doc.y;
@@ -220,7 +254,7 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
         valueFont: fontR,
         valueAlign: 'left'
       });
-      infoY += 18;
+      infoY += 20;
 
       doc.y = infoY;
     } else {
@@ -239,13 +273,11 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
     doc.moveTo(40, doc.y).lineTo(555, doc.y).lineWidth(1).stroke('#bbb');
     doc.moveDown(0.6);
 
-    // ============================================
     // EXAMS TITLE
-    // ============================================
     doc.fontSize(14).font(fontB).fillColor('#111');
 
     if (fonts.hasArabic) {
-      doc.text('نتائج الامتحانات', { align: 'right' });
+      doc.text(rtlText('نتائج الامتحانات'), { align: 'right' });
       doc.moveDown(0.2);
 
       var countY = doc.y;
@@ -254,7 +286,7 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
         valueFont: fontR,
         valueAlign: 'left'
       });
-      doc.y = countY + 20;
+      doc.y = countY + 22;
     } else {
       doc.text('Last ' + exams.length + ' Exam Results');
       doc.moveDown(0.3);
@@ -262,12 +294,10 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
 
     doc.moveDown(0.2);
 
-    // ============================================
     // EXAMS
-    // ============================================
     for (var e = 0; e < exams.length; e++) {
       var exam = exams[e];
-      var cardHeight = fonts.hasArabic ? 155 : 130;
+      var cardHeight = fonts.hasArabic ? 160 : 130;
 
       if (doc.y > (760 - cardHeight)) doc.addPage();
 
@@ -301,7 +331,6 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
         drawArabicField(doc, rowY, 'الوقت', formatTimeAr(exam.createdAt), {
           labelFont: fontR,
           valueFont: fontR,
-          valueAlign: 'left',
           color: '#555'
         });
         rowY += 15;
@@ -324,7 +353,7 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
         doc.text(
           exam.correctAnswers + ' / ' + exam.totalQuestions,
           55,
-          cardY + 78,
+          cardY + 82,
           { width: 490, align: 'center' }
         );
 
@@ -332,7 +361,7 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
         doc.text(
           exam.passed ? 'ناجح' : 'راسب',
           55,
-          cardY + 112,
+          cardY + 116,
           { width: 490, align: 'center' }
         );
 
@@ -343,7 +372,7 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
         doc.text(
           String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0'),
           55,
-          cardY + 134,
+          cardY + 138,
           { width: 490, align: 'center' }
         );
       } else {
@@ -396,9 +425,7 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
       doc.y = cardY + cardHeight + 12;
     }
 
-    // ============================================
     // FOOTER
-    // ============================================
     doc.moveDown(0.5);
     doc.moveTo(40, doc.y).lineTo(555, doc.y).lineWidth(1).stroke('#ccc');
     doc.moveDown(0.3);
