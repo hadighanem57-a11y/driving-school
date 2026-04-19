@@ -9,15 +9,45 @@ const { auth, authorize } = require('../middleware/auth');
 
 const upload = multer({ dest: 'uploads/temp/' });
 
-const imageStorage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'uploads/signs/');
-  },
-  filename: function (req, file, cb) {
-    cb(null, Date.now() + '-' + file.originalname);
+const imageUpload = multer({ dest: 'uploads/temp/' });
+
+function cleanupTemp(filePath) {
+  try {
+    if (filePath && fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  } catch (e) {
+    console.log('Temp cleanup error:', e.message);
   }
-});
-const imageUpload = multer({ storage: imageStorage });
+}
+
+async function uploadToImgBB(file) {
+  if (!process.env.IMGBB_API_KEY) {
+    throw new Error('IMGBB_API_KEY missing in environment variables');
+  }
+
+  const base64Image = fs.readFileSync(file.path, { encoding: 'base64' });
+
+  const form = new URLSearchParams();
+  form.append('key', process.env.IMGBB_API_KEY);
+  form.append('name', path.parse(file.originalname).name);
+  form.append('image', base64Image);
+
+  const response = await fetch('https://api.imgbb.com/1/upload', {
+    method: 'POST',
+    body: form
+  });
+
+  const data = await response.json();
+
+  if (!response.ok || !data.success) {
+    throw new Error(
+      (data && data.error && data.error.message) || 'ImgBB upload failed'
+    );
+  }
+
+  return data.data.display_url || data.data.url;
+}
 
 function clean(val) {
   if (val === undefined || val === null) return '';
