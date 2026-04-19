@@ -108,7 +108,7 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
     // Line
     doc.moveTo(40, doc.y).lineTo(555, doc.y).lineWidth(1).stroke('#999');
     doc.moveDown(0.5);
-
+ 
     // ============================================
     // EXAM RESULTS
     // ============================================
