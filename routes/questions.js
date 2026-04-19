@@ -7,10 +7,11 @@ const { parse } = require('csv-parse/sync');
 const Question = require('../models/Question');
 const { auth, authorize } = require('../middleware/auth');
 
+// ✅ ALL uploads go to temp folder first
 const upload = multer({ dest: 'uploads/temp/' });
-
 const imageUpload = multer({ dest: 'uploads/temp/' });
 
+// ✅ Cleanup temp files
 function cleanupTemp(filePath) {
   try {
     if (filePath && fs.existsSync(filePath)) {
@@ -21,24 +22,25 @@ function cleanupTemp(filePath) {
   }
 }
 
+// ✅ Upload to ImgBB
 async function uploadToImgBB(file) {
   if (!process.env.IMGBB_API_KEY) {
     throw new Error('IMGBB_API_KEY missing in environment variables');
   }
 
-  const base64Image = fs.readFileSync(file.path, { encoding: 'base64' });
+  var base64Image = fs.readFileSync(file.path, { encoding: 'base64' });
 
-  const form = new URLSearchParams();
+  var form = new URLSearchParams();
   form.append('key', process.env.IMGBB_API_KEY);
   form.append('name', path.parse(file.originalname).name);
   form.append('image', base64Image);
 
-  const response = await fetch('https://api.imgbb.com/1/upload', {
+  var response = await fetch('https://api.imgbb.com/1/upload', {
     method: 'POST',
     body: form
   });
 
-  const data = await response.json();
+  var data = await response.json();
 
   if (!response.ok || !data.success) {
     throw new Error(
@@ -55,50 +57,42 @@ function clean(val) {
 }
 
 function normalizeCategory(val) {
-  const raw = clean(val).toLowerCase();
-
+  var raw = clean(val).toLowerCase();
   if (raw === 'car') return 'Car';
   if (raw === 'moto' || raw === 'motorcycle') return 'Moto';
   if (raw === 'public') return 'Public';
   if (raw === 'bus') return 'Bus';
   if (raw === 'truck') return 'Truck';
-
   return clean(val) || 'Car';
 }
 
 function normalizeQuestionCategory(val) {
-  const raw = clean(val).toLowerCase();
-
+  var raw = clean(val).toLowerCase();
   if (raw === 'law' || raw === 'laws') return 'Law';
   if (raw === 'safety' || raw === 'safeties') return 'Safety';
   if (raw === 'sign' || raw === 'signs') return 'Sign';
-
   return 'Law';
 }
 
 function normalizeDifficulty(val) {
-  const raw = clean(val).toLowerCase();
+  var raw = clean(val).toLowerCase();
   if (raw === 'easy') return 'Easy';
   if (raw === 'hard') return 'Hard';
   return 'Medium';
 }
 
 function normalizeBool(val) {
-  const raw = clean(val).toLowerCase();
+  var raw = clean(val).toLowerCase();
   return raw === 'true' || raw === '1' || raw === 'yes';
 }
 
-// IMPORT CSV
-router.post('/import', auth, authorize('admin', 'superadmin'),upload.single('file'), async function (req, res) {
+// ✅ IMPORT CSV
+router.post('/import', auth, authorize('admin', 'superadmin'), upload.single('file'), async function(req, res) {
   try {
-    if (!req.file) {
-      return res.status(400).json({ message: 'No file uploaded' });
-    }
+    if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
-    const filePath = req.file.path;
-    const content = fs.readFileSync(filePath, 'utf8');
-
-    const records = parse(content, {
+    var content = fs.readFileSync(req.file.path, 'utf8');
+    var records = parse(content, {
       columns: true,
       skip_empty_lines: true,
       bom: true,
@@ -107,34 +101,31 @@ router.post('/import', auth, authorize('admin', 'superadmin'),upload.single('fil
       trim: true
     });
 
-    console.log('=== CSV IMPORT START ===');
-    console.log('Rows found:', records.length);
+    console.log('=== CSV IMPORT START === Rows:', records.length);
 
-    let imported = 0;
-    let updated = 0;
-    let errors = [];
+    var imported = 0;
+    var updated = 0;
+    var lawCount = 0;
+    var safetyCount = 0;
+    var signCount = 0;
+    var imageCount = 0;
+    var errors = [];
 
-    let lawCount = 0;
-    let safetyCount = 0;
-    let signCount = 0;
-    let imageCount = 0;
-
-    for (let i = 0; i < records.length; i++) {
+    for (var i = 0; i < records.length; i++) {
       try {
-        const row = records[i];
-
-        const setNumber = parseInt(clean(row.SetNumber || row.Id || 0), 10);
+        var row = records[i];
+        var setNumber = parseInt(clean(row.SetNumber || row.Id || 0), 10);
         if (!setNumber || isNaN(setNumber)) continue;
 
-        const questionCategory = normalizeQuestionCategory(row.QuestionCategory);
-        const imagePath = clean(row.ImagePath);
+        var questionCategory = normalizeQuestionCategory(row.QuestionCategory);
+        var imagePath = clean(row.ImagePath);
 
         if (questionCategory === 'Law') lawCount++;
         if (questionCategory === 'Safety') safetyCount++;
         if (questionCategory === 'Sign') signCount++;
         if (imagePath) imageCount++;
 
-        const questionData = {
+        var questionData = {
           setNumber: setNumber,
           questionText: {
             English: clean(row.QuestionTextEnglish),
@@ -164,8 +155,7 @@ router.post('/import', auth, authorize('admin', 'superadmin'),upload.single('fil
           imagePath: imagePath
         };
 
-        const existing = await Question.findOne({ setNumber: setNumber });
-
+        var existing = await Question.findOne({ setNumber: setNumber });
         if (existing) {
           await Question.findByIdAndUpdate(existing._id, questionData);
           updated++;
@@ -174,36 +164,20 @@ router.post('/import', auth, authorize('admin', 'superadmin'),upload.single('fil
           imported++;
         }
       } catch (err) {
-        errors.push({
-          row: i + 2,
-          error: err.message
-        });
+        errors.push({ row: i + 2, error: err.message });
       }
     }
 
-    try {
-      fs.unlinkSync(filePath);
-    } catch (e) {}
+    cleanupTemp(req.file.path);
 
-    console.log('Imported:', imported);
-    console.log('Updated:', updated);
-    console.log('Law:', lawCount);
-    console.log('Safety:', safetyCount);
-    console.log('Sign:', signCount);
-    console.log('With imagePath:', imageCount);
-    console.log('Errors:', errors.length);
-    console.log('=== CSV IMPORT END ===');
+    console.log('Imported:', imported, 'Updated:', updated);
 
     return res.json({
-      message: `Imported: ${imported}, Updated: ${updated}, Errors: ${errors.length}`,
-      imported,
-      updated,
-      breakdown: {
-        law: lawCount,
-        safety: safetyCount,
-        sign: signCount
-      },
-      imageCount,
+      message: 'Imported: ' + imported + ', Updated: ' + updated + ', Errors: ' + errors.length,
+      imported: imported,
+      updated: updated,
+      breakdown: { law: lawCount, safety: safetyCount, sign: signCount },
+      imageCount: imageCount,
       errors: errors.slice(0, 20)
     });
   } catch (err) {
@@ -212,20 +186,20 @@ router.post('/import', auth, authorize('admin', 'superadmin'),upload.single('fil
   }
 });
 
-// EXPORT
-router.get('/export', auth, authorize('admin', 'superadmin'), async function (req, res) {
+// ✅ EXPORT
+router.get('/export', auth, authorize('admin', 'superadmin'), async function(req, res) {
   try {
-    const questions = await Question.find().sort({ setNumber: 1 });
+    var questions = await Question.find().sort({ setNumber: 1 });
     res.json(questions);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// STATS
-router.get('/stats', auth, authorize('admin', 'superadmin'), async function (req, res) {
+// ✅ STATS
+router.get('/stats', auth, authorize('admin', 'superadmin'), async function(req, res) {
   try {
-    const stats = await Question.aggregate([
+    var stats = await Question.aggregate([
       {
         $group: {
           _id: { category: '$category', questionCategory: '$questionCategory' },
@@ -234,27 +208,23 @@ router.get('/stats', auth, authorize('admin', 'superadmin'), async function (req
       },
       { $sort: { '_id.category': 1 } }
     ]);
-
-    const total = await Question.countDocuments();
-    const active = await Question.countDocuments({ isActive: true });
-
-    res.json({ stats, total, active });
+    var total = await Question.countDocuments();
+    var active = await Question.countDocuments({ isActive: true });
+    res.json({ stats: stats, total: total, active: active });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// GET ALL WITH FILTERS
-router.get('/', auth, async function (req, res) {
+// ✅ GET ALL WITH FILTERS
+router.get('/', auth, async function(req, res) {
   try {
-    const filter = {};
-
+    var filter = {};
     if (req.query.category) filter.category = req.query.category;
     if (req.query.questionCategory) filter.questionCategory = req.query.questionCategory;
     if (req.query.isActive !== undefined && req.query.isActive !== '') {
       filter.isActive = req.query.isActive === 'true';
     }
-
     if (req.query.search) {
       filter.$or = [
         { 'questionText.English': { $regex: req.query.search, $options: 'i' } },
@@ -262,48 +232,41 @@ router.get('/', auth, async function (req, res) {
         { 'questionText.French': { $regex: req.query.search, $options: 'i' } }
       ];
     }
-
-    const page = parseInt(req.query.page || '1', 10);
-    const limit = parseInt(req.query.limit || '50', 10);
-
-    const total = await Question.countDocuments(filter);
-    const questions = await Question.find(filter)
+    var page = parseInt(req.query.page || '1', 10);
+    var limit = parseInt(req.query.limit || '50', 10);
+    var total = await Question.countDocuments(filter);
+    var questions = await Question.find(filter)
       .skip((page - 1) * limit)
       .limit(limit)
       .sort({ setNumber: 1 });
-
-    res.json({
-      questions,
-      total,
-      pages: Math.ceil(total / limit)
-    });
+    res.json({ questions: questions, total: total, pages: Math.ceil(total / limit) });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// ADD SINGLE
-router.post('/', auth, authorize('admin', 'superadmin'), async function (req, res) {
+// ✅ ADD SINGLE
+router.post('/', auth, authorize('admin', 'superadmin'), async function(req, res) {
   try {
-    const question = await Question.create(req.body);
+    var question = await Question.create(req.body);
     res.status(201).json(question);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// EDIT
-router.put('/:id', auth, authorize('admin', 'superadmin'), async function (req, res) {
+// ✅ EDIT
+router.put('/:id', auth, authorize('admin', 'superadmin'), async function(req, res) {
   try {
-    const question = await Question.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    var question = await Question.findByIdAndUpdate(req.params.id, req.body, { new: true });
     res.json(question);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// DELETE
-router.delete('/:id', auth, authorize('admin', 'superadmin'), async function (req, res) {
+// ✅ DELETE
+router.delete('/:id', auth, authorize('admin', 'superadmin'), async function(req, res) {
   try {
     await Question.findByIdAndDelete(req.params.id);
     res.json({ message: 'Deleted' });
@@ -312,40 +275,80 @@ router.delete('/:id', auth, authorize('admin', 'superadmin'), async function (re
   }
 });
 
-// UPLOAD ONE IMAGE
-router.post('/upload-image', auth, authorize('admin', 'superadmin'), imageUpload.single('image'), async function (req, res) {
+// ✅ UPLOAD ONE IMAGE - TO IMGBB
+router.post('/upload-image', auth, authorize('admin', 'superadmin'), imageUpload.single('image'), async function(req, res) {
   try {
-    if (!req.file) return res.status(400).json({ message: 'No image uploaded' });
-
-    const imagePath = '/uploads/signs/' + req.file.filename;
-
-    if (req.body.questionId) {
-      await Question.findByIdAndUpdate(req.body.questionId, { imagePath });
+    if (!req.file) {
+      return res.status(400).json({ message: 'No image uploaded' });
     }
 
-    res.json({ imagePath });
+    console.log('UPLOADING IMAGE TO IMGBB:', req.file.originalname);
+
+    var imagePath = await uploadToImgBB(req.file);
+
+    console.log('IMGBB URL:', imagePath);
+
+    if (req.body.questionId) {
+      await Question.findByIdAndUpdate(req.body.questionId, { imagePath: imagePath });
+      console.log('UPDATED QUESTION:', req.body.questionId, 'WITH IMAGE:', imagePath);
+    }
+
+    cleanupTemp(req.file.path);
+
+    res.json({ imagePath: imagePath });
   } catch (err) {
+    cleanupTemp(req.file && req.file.path);
+    console.log('UPLOAD IMAGE ERROR:', err.message);
     res.status(500).json({ message: err.message });
   }
 });
 
-// UPLOAD MANY IMAGES
-router.post('/upload-images', auth, authorize('admin', 'superadmin'), imageUpload.array('images', 500), async function (req, res) {
+// ✅ UPLOAD MANY IMAGES - TO IMGBB
+router.post('/upload-images', auth, authorize('admin', 'superadmin'), imageUpload.array('images', 500), async function(req, res) {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ message: 'No images uploaded' });
     }
 
-    const files = req.files.map(f => ({
-      name: f.originalname,
-      path: '/uploads/signs/' + f.filename
-    }));
+    console.log('UPLOADING', req.files.length, 'IMAGES TO IMGBB');
+
+    var files = [];
+
+    for (var i = 0; i < req.files.length; i++) {
+      var file = req.files[i];
+
+      try {
+        var imageUrl = await uploadToImgBB(file);
+
+        files.push({
+          name: file.originalname,
+          path: imageUrl
+        });
+
+        console.log('UPLOADED:', file.originalname, '->', imageUrl);
+      } catch (uploadErr) {
+        console.log('FAILED TO UPLOAD:', file.originalname, uploadErr.message);
+        files.push({
+          name: file.originalname,
+          path: '',
+          error: uploadErr.message
+        });
+      }
+
+      cleanupTemp(file.path);
+    }
 
     res.json({
-      message: `${files.length} images uploaded`,
-      files
+      message: files.length + ' images processed',
+      files: files
     });
   } catch (err) {
+    if (req.files && req.files.length) {
+      req.files.forEach(function(file) {
+        cleanupTemp(file.path);
+      });
+    }
+    console.log('UPLOAD MANY IMAGES ERROR:', err.message);
     res.status(500).json({ message: err.message });
   }
 });
