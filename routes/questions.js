@@ -7,11 +7,9 @@ const { parse } = require('csv-parse/sync');
 const Question = require('../models/Question');
 const { auth, authorize } = require('../middleware/auth');
 
-// ✅ ALL uploads go to temp folder first
 const upload = multer({ dest: 'uploads/temp/' });
 const imageUpload = multer({ dest: 'uploads/temp/' });
 
-// ✅ Cleanup temp files
 function cleanupTemp(filePath) {
   try {
     if (filePath && fs.existsSync(filePath)) {
@@ -22,7 +20,6 @@ function cleanupTemp(filePath) {
   }
 }
 
-// ✅ Upload to ImgBB
 async function uploadToImgBB(file) {
   if (!process.env.IMGBB_API_KEY) {
     throw new Error('IMGBB_API_KEY missing in environment variables');
@@ -85,6 +82,10 @@ function normalizeBool(val) {
   var raw = clean(val).toLowerCase();
   return raw === 'true' || raw === '1' || raw === 'yes';
 }
+
+// ============================================
+// ✅ SPECIFIC ROUTES FIRST (قبل /:id)
+// ============================================
 
 // ✅ IMPORT CSV
 router.post('/import', auth, authorize('admin', 'superadmin'), upload.single('file'), async function(req, res) {
@@ -169,7 +170,6 @@ router.post('/import', auth, authorize('admin', 'superadmin'), upload.single('fi
     }
 
     cleanupTemp(req.file.path);
-
     console.log('Imported:', imported, 'Updated:', updated);
 
     return res.json({
@@ -216,7 +216,154 @@ router.get('/stats', auth, authorize('admin', 'superadmin'), async function(req,
   }
 });
 
-// ✅ GET ALL WITH FILTERS
+// ✅ DELETE ALL QUESTIONS - لازم قبل /:id
+router.delete('/delete-all', auth, authorize('superadmin'), async function(req, res) {
+  try {
+    var result = await Question.deleteMany({});
+    console.log('DELETED ALL QUESTIONS:', result.deletedCount);
+    res.json({ message: 'Deleted ' + result.deletedCount + ' questions' });
+  } catch (err) {
+    console.log('DELETE ALL ERROR:', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ✅ UPLOAD ONE IMAGE
+router.post('/upload-image', auth, authorize('admin', 'superadmin'), imageUpload.single('image'), async function(req, res) {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'No image uploaded' });
+    }
+
+    console.log('UPLOADING IMAGE TO IMGBB:', req.file.originalname);
+    var imagePath = await uploadToImgBB(req.file);
+    console.log('IMGBB URL:', imagePath);
+
+    if (req.body.questionId) {
+      await Question.findByIdAndUpdate(req.body.questionId, { imagePath: imagePath });
+      console.log('UPDATED QUESTION:', req.body.questionId, 'WITH IMAGE:', imagePath);
+    }
+
+    cleanupTemp(req.file.path);
+    res.json({ imagePath: imagePath });
+  } catch (err) {
+    cleanupTemp(req.file && req.file.path);
+    console.log('UPLOAD IMAGE ERROR:', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ✅ UPLOAD MANY IMAGES
+router.post('/upload-images', auth, authorize('admin', 'superadmin'), imageUpload.array('images', 500), async function(req, res) {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ message: 'No images uploaded' });
+    }
+
+    console.log('UPLOADING', req.files.length, 'IMAGES TO IMGBB');
+
+    var files = [];
+
+    for (var i = 0; i < req.files.length; i++) {
+      var file = req.files[i];
+      try {
+        var imageUrl = await uploadToImgBB(file);
+        files.push({ name: file.originalname, path: imageUrl });
+        console.log('UPLOADED:', file.originalname, '->', imageUrl);
+      } catch (uploadErr) {
+        console.log('FAILED TO UPLOAD:', file.originalname, uploadErr.message);
+        files.push({ name: file.originalname, path: '', error: uploadErr.message });
+      }
+      cleanupTemp(file.path);
+    }
+
+    res.json({
+      message: files.length + ' images processed',
+      files: files
+    });
+  } catch (err) {
+    if (req.files && req.files.length) {
+      req.files.forEach(function(file) { cleanupTemp(file.path); });
+    }
+    console.log('UPLOAD MANY IMAGES ERROR:', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ✅ UPLOAD IMAGES + AUTO-MATCH BY FILENAME = SET NUMBER
+router.post('/upload-images-auto', auth, authorize('admin', 'superadmin'), imageUpload.array('images', 500), async function(req, res) {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ message: 'No images uploaded' });
+    }
+
+    console.log('=== AUTO UPLOAD START ===', req.files.length, 'files');
+
+    var matched = 0;
+    var notFound = 0;
+    var failed = 0;
+    var results = [];
+
+    for (var i = 0; i < req.files.length; i++) {
+      var file = req.files[i];
+      try {
+        var nameOnly = path.parse(file.originalname).name;
+        var setNumber = parseInt(nameOnly, 10);
+
+        if (!setNumber || isNaN(setNumber)) {
+          console.log('SKIP (no number):', file.originalname);
+          results.push({ name: file.originalname, status: 'skipped', reason: 'filename is not a number' });
+          cleanupTemp(file.path);
+          failed++;
+          continue;
+        }
+
+        var question = await Question.findOne({ setNumber: setNumber });
+
+        if (!question) {
+          console.log('SKIP (no question):', setNumber);
+          results.push({ name: file.originalname, status: 'not_found', reason: 'no question with setNumber ' + setNumber });
+          cleanupTemp(file.path);
+          notFound++;
+          continue;
+        }
+
+        var imageUrl = await uploadToImgBB(file);
+        await Question.findByIdAndUpdate(question._id, { imagePath: imageUrl });
+
+        console.log('MATCHED:', file.originalname, '-> Q#' + setNumber, '->', imageUrl);
+        results.push({ name: file.originalname, status: 'matched', setNumber: setNumber, url: imageUrl });
+        matched++;
+
+      } catch (uploadErr) {
+        console.log('ERROR:', file.originalname, uploadErr.message);
+        results.push({ name: file.originalname, status: 'error', reason: uploadErr.message });
+        failed++;
+      }
+
+      cleanupTemp(file.path);
+    }
+
+    console.log('=== AUTO UPLOAD DONE === Matched:', matched, 'NotFound:', notFound, 'Failed:', failed);
+
+    res.json({
+      message: matched + ' images matched, ' + notFound + ' questions not found, ' + failed + ' failed',
+      matched: matched,
+      notFound: notFound,
+      failed: failed,
+      results: results
+    });
+
+  } catch (err) {
+    if (req.files && req.files.length) {
+      req.files.forEach(function(file) { cleanupTemp(file.path); });
+    }
+    console.log('AUTO UPLOAD ERROR:', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ✅ GET ALL WITH FILTERS - قبل /:id
 router.get('/', auth, async function(req, res) {
   try {
     var filter = {};
@@ -255,6 +402,10 @@ router.post('/', auth, authorize('admin', 'superadmin'), async function(req, res
   }
 });
 
+// ============================================
+// ✅ DYNAMIC ROUTES LAST (/:id دايمًا بالآخر)
+// ============================================
+
 // ✅ EDIT
 router.put('/:id', auth, authorize('admin', 'superadmin'), async function(req, res) {
   try {
@@ -265,7 +416,7 @@ router.put('/:id', auth, authorize('admin', 'superadmin'), async function(req, r
   }
 });
 
-// ✅ DELETE
+// ✅ DELETE ONE
 router.delete('/:id', auth, authorize('admin', 'superadmin'), async function(req, res) {
   try {
     await Question.findByIdAndDelete(req.params.id);
@@ -275,172 +426,4 @@ router.delete('/:id', auth, authorize('admin', 'superadmin'), async function(req
   }
 });
 
-// ✅ UPLOAD ONE IMAGE - TO IMGBB
-router.post('/upload-image', auth, authorize('admin', 'superadmin'), imageUpload.single('image'), async function(req, res) {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ message: 'No image uploaded' });
-    }
-
-    console.log('UPLOADING IMAGE TO IMGBB:', req.file.originalname);
-
-    var imagePath = await uploadToImgBB(req.file);
-
-    console.log('IMGBB URL:', imagePath);
-
-    if (req.body.questionId) {
-      await Question.findByIdAndUpdate(req.body.questionId, { imagePath: imagePath });
-      console.log('UPDATED QUESTION:', req.body.questionId, 'WITH IMAGE:', imagePath);
-    }
-
-    cleanupTemp(req.file.path);
-
-    res.json({ imagePath: imagePath });
-  } catch (err) {
-    cleanupTemp(req.file && req.file.path);
-    console.log('UPLOAD IMAGE ERROR:', err.message);
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// ✅ UPLOAD MANY IMAGES - TO IMGBB
-router.post('/upload-images', auth, authorize('admin', 'superadmin'), imageUpload.array('images', 500), async function(req, res) {
-  try {
-    if (!req.files || req.files.length === 0) {
-      return res.status(400).json({ message: 'No images uploaded' });
-    }
-
-    console.log('UPLOADING', req.files.length, 'IMAGES TO IMGBB');
-
-    var files = [];
-
-    for (var i = 0; i < req.files.length; i++) {
-      var file = req.files[i];
-
-      try {
-        var imageUrl = await uploadToImgBB(file);
-
-        files.push({
-          name: file.originalname,
-          path: imageUrl
-        });
-
-        console.log('UPLOADED:', file.originalname, '->', imageUrl);
-      } catch (uploadErr) {
-        console.log('FAILED TO UPLOAD:', file.originalname, uploadErr.message);
-        files.push({
-          name: file.originalname,
-          path: '',
-          error: uploadErr.message
-        });
-      }
-
-      cleanupTemp(file.path);
-    }
-
-    res.json({
-      message: files.length + ' images processed',
-      files: files
-    });
-  } catch (err) {
-    if (req.files && req.files.length) {
-      req.files.forEach(function(file) {
-        cleanupTemp(file.path);
-      });
-    }
-    console.log('UPLOAD MANY IMAGES ERROR:', err.message);
-    res.status(500).json({ message: err.message });
-  }
-});
-// ✅ DELETE ALL QUESTIONS
-router.delete('/delete-all', auth, authorize('superadmin'), async function(req, res) {
-  try {
-    var result = await Question.deleteMany({});
-    console.log('DELETED ALL QUESTIONS:', result.deletedCount);
-    res.json({ message: 'Deleted ' + result.deletedCount + ' questions' });
-  } catch (err) {
-    console.log('DELETE ALL ERROR:', err.message);
-    res.status(500).json({ message: err.message });
-  }
-});
-// ✅ UPLOAD IMAGES + AUTO-MATCH BY FILENAME = SET NUMBER
-router.post('/upload-images-auto', auth, authorize('admin', 'superadmin'), imageUpload.array('images', 500), async function(req, res) {
-  try {
-    if (!req.files || req.files.length === 0) {
-      return res.status(400).json({ message: 'No images uploaded' });
-    }
-
-    console.log('=== AUTO UPLOAD START ===', req.files.length, 'files');
-
-    var matched = 0;
-    var notFound = 0;
-    var failed = 0;
-    var results = [];
-
-    for (var i = 0; i < req.files.length; i++) {
-      var file = req.files[i];
-
-      try {
-        // get set number from filename: "101.png" -> 101, "205.jpg" -> 205
-        var nameOnly = path.parse(file.originalname).name;
-        var setNumber = parseInt(nameOnly, 10);
-
-        if (!setNumber || isNaN(setNumber)) {
-          console.log('SKIP (no number):', file.originalname);
-          results.push({ name: file.originalname, status: 'skipped', reason: 'filename is not a number' });
-          cleanupTemp(file.path);
-          failed++;
-          continue;
-        }
-
-        // find question with this setNumber
-        var question = await Question.findOne({ setNumber: setNumber });
-
-        if (!question) {
-          console.log('SKIP (no question):', setNumber);
-          results.push({ name: file.originalname, status: 'not_found', reason: 'no question with setNumber ' + setNumber });
-          cleanupTemp(file.path);
-          notFound++;
-          continue;
-        }
-
-        // upload to ImgBB
-        var imageUrl = await uploadToImgBB(file);
-
-        // update question with new image URL
-        await Question.findByIdAndUpdate(question._id, { imagePath: imageUrl });
-
-        console.log('MATCHED:', file.originalname, '-> Q#' + setNumber, '->', imageUrl);
-        results.push({ name: file.originalname, status: 'matched', setNumber: setNumber, url: imageUrl });
-        matched++;
-
-      } catch (uploadErr) {
-        console.log('ERROR:', file.originalname, uploadErr.message);
-        results.push({ name: file.originalname, status: 'error', reason: uploadErr.message });
-        failed++;
-      }
-
-      cleanupTemp(file.path);
-    }
-
-    console.log('=== AUTO UPLOAD DONE === Matched:', matched, 'NotFound:', notFound, 'Failed:', failed);
-
-    res.json({
-      message: matched + ' images matched, ' + notFound + ' questions not found, ' + failed + ' failed',
-      matched: matched,
-      notFound: notFound,
-      failed: failed,
-      results: results
-    });
-
-  } catch (err) {
-    if (req.files && req.files.length) {
-      req.files.forEach(function(file) {
-        cleanupTemp(file.path);
-      });
-    }
-    console.log('AUTO UPLOAD ERROR:', err.message);
-    res.status(500).json({ message: err.message });
-  }
-});
 module.exports = router;
