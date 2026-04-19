@@ -73,6 +73,11 @@ router.put('/change-password', auth, async function (req, res) {
     }
 
     var user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
     var isMatch = await bcrypt.compare(req.body.oldPassword, user.password);
 
     if (!isMatch) {
@@ -88,3 +93,4 @@ router.put('/change-password', auth, async function (req, res) {
   }
 });
 
+module.exports = router;
