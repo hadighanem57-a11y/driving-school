@@ -6,6 +6,15 @@ require('dotenv').config();
 
 const User = require('./models/User');
 
+const authRoutes = require('./routes/auth');
+const superadminRoutes = require('./routes/superadmin');
+const adminRoutes = require('./routes/admin');
+const schoolRoutes = require('./routes/school');
+const questionsRoutes = require('./routes/questions');
+const examRoutes = require('./routes/exam');
+const reportRoutes = require('./routes/report');
+const videoRoutes = require('./routes/video');
+
 const app = express();
 
 const allowedOrigins = [
@@ -25,7 +34,7 @@ function isAllowedOrigin(origin) {
 }
 
 app.use(function (req, res, next) {
-  var origin = req.headers.origin;
+  const origin = req.headers.origin;
 
   if (isAllowedOrigin(origin)) {
     if (origin) res.header('Access-Control-Allow-Origin', origin);
@@ -52,14 +61,14 @@ app.use(function (req, res, next) {
   next();
 });
 
-app.use('/api/auth', require('./routes/auth'));
-app.use('/api/superadmin', require('./routes/superadmin'));
-app.use('/api/admin', require('./routes/admin'));
-app.use('/api/school', require('./routes/school'));
-app.use('/api/questions', require('./routes/questions'));
-app.use('/api/exam', require('./routes/exam'));
-app.use('/api/report', require('./routes/report'));
-app.use('/api/video', require('./routes/video'));
+app.use('/api/auth', authRoutes);
+app.use('/api/superadmin', superadminRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/school', schoolRoutes);
+app.use('/api/questions', questionsRoutes);
+app.use('/api/exam', examRoutes);
+app.use('/api/report', reportRoutes);
+app.use('/api/video', videoRoutes);
 
 app.use(function (err, req, res, next) {
   console.error('SERVER ERROR:', err);
@@ -109,11 +118,11 @@ mongoose.connect(process.env.MONGODB_URI)
     await seedAdmin();
 
     try {
-      var usersCollection = mongoose.connection.db.collection('users');
-      var indexes = await usersCollection.indexes();
-      console.log('USERS INDEXES:', indexes.map(function(i) { return i.name; }));
+      const usersCollection = mongoose.connection.db.collection('users');
+      const indexes = await usersCollection.indexes();
+      console.log('USERS INDEXES:', indexes.map(function (i) { return i.name; }));
 
-      var hasUsernameIndex = indexes.some(function(i) {
+      const hasUsernameIndex = indexes.some(function (i) {
         return i.name === 'username_1';
       });
 
@@ -127,7 +136,7 @@ mongoose.connect(process.env.MONGODB_URI)
       console.log('Index cleanup error:', e.message);
     }
 
-    var PORT = process.env.PORT || 5000;
+    const PORT = process.env.PORT || 5000;
     app.listen(PORT, function () {
       console.log('Server running on port ' + PORT);
     });
