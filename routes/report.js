@@ -7,6 +7,29 @@ const { auth } = require('../middleware/auth');
 const path = require('path');
 const fs = require('fs');
 
+// ============================================
+// ARABIC TEXT FIX - بيعكس الكلمات صح
+// ============================================
+function fixArabic(text) {
+  if (!text) return '';
+  text = String(text);
+
+  // اقسم النص لكلمات
+  var words = text.split(' ');
+  var result = [];
+
+  for (var i = 0; i < words.length; i++) {
+    var word = words[i];
+    // اعكس كل كلمة عربية
+    var reversed = word.split('').reverse().join('');
+    result.push(reversed);
+  }
+
+  // اعكس ترتيب الكلمات كلها
+  result.reverse();
+  return result.join(' ');
+}
+
 function formatDateAr(date) {
   var months = [
     'كانون الثاني', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران',
@@ -26,23 +49,6 @@ function formatTimeAr(date) {
   return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ' ' + period;
 }
 
-function reverseArabic(text) {
-  if (!text) return '';
-  var parts = text.split(/(\s+)/);
-  var result = [];
-  var arabicRegex = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/;
-
-  for (var i = 0; i < parts.length; i++) {
-    if (arabicRegex.test(parts[i])) {
-      result.push(parts[i].split('').reverse().join(''));
-    } else {
-      result.push(parts[i]);
-    }
-  }
-
-  return result.reverse().join('');
-}
-
 function setupFonts(doc) {
   var regularPath = path.join(__dirname, '..', 'fonts', 'Amiri-Regular.ttf');
   var boldPath = path.join(__dirname, '..', 'fonts', 'Amiri-Bold.ttf');
@@ -51,7 +57,6 @@ function setupFonts(doc) {
   var hasBold = fs.existsSync(boldPath);
 
   console.log('Font check - Regular:', hasRegular, 'Bold:', hasBold);
-  console.log('Font paths:', regularPath, boldPath);
 
   if (hasRegular) {
     doc.registerFont('Arabic', regularPath);
@@ -67,6 +72,9 @@ function setupFonts(doc) {
   };
 }
 
+// ============================================
+// STUDENT PDF
+// ============================================
 router.get('/student-pdf/:studentId', auth, async function(req, res) {
   try {
     var student = await User.findById(req.params.studentId).select('-password');
@@ -92,35 +100,43 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
     var fonts = setupFonts(doc);
     var fontR = fonts.regular;
     var fontB = fonts.bold;
-
-    console.log('Using fonts:', fontR, fontB, 'Arabic:', fonts.hasArabic);
+    var ar = fonts.hasArabic;
 
     // ============================================
     // HEADER
     // ============================================
-    doc.fontSize(24).font(fontB);
-    if (fonts.hasArabic) {
-      doc.text('تقرير نتائج الامتحان', { align: 'center' });
-    } else {
-      doc.text('EXAM RESULTS REPORT', { align: 'center' });
-    }
+    doc.fontSize(22).font(fontB);
+    doc.text(
+      ar ? fixArabic('تقرير نتائج الامتحان') : 'EXAM RESULTS REPORT',
+      { align: 'center' }
+    );
     doc.moveDown(0.5);
 
     if (school) {
-      doc.fontSize(18).font(fontB).text(school.schoolName || '', { align: 'center' });
+      doc.fontSize(16).font(fontB).text(
+        ar ? fixArabic(school.schoolName || '') : (school.schoolName || ''),
+        { align: 'center' }
+      );
       doc.moveDown(0.2);
-      doc.fontSize(11).font(fontR);
+      doc.fontSize(10).font(fontR);
 
-      if (fonts.hasArabic) {
-        doc.text('رقم الرخصة: ' + (school.licenseNumber || ''), { align: 'center' });
-        doc.text('هاتف: ' + (school.phone || '') + '  —  ' + (school.address || ''), { align: 'center' });
+      if (ar) {
+        doc.text(
+          fixArabic('رقم الرخصة') + ': ' + (school.licenseNumber || ''),
+          { align: 'center' }
+        );
+        doc.text(
+          fixArabic('هاتف') + ': ' + (school.phone || '') +
+          '  —  ' + fixArabic(school.address || ''),
+          { align: 'center' }
+        );
       } else {
         doc.text('License: ' + (school.licenseNumber || ''), { align: 'center' });
         doc.text('Phone: ' + (school.phone || '') + '  |  ' + (school.address || ''), { align: 'center' });
       }
     }
 
-    doc.moveDown(0.4);
+    doc.moveDown(0.5);
     doc.moveTo(40, doc.y).lineTo(555, doc.y).lineWidth(2).stroke('#333');
     doc.moveDown(0.6);
 
@@ -128,22 +144,33 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
     // STUDENT INFO
     // ============================================
     doc.fontSize(14).font(fontB);
-    if (fonts.hasArabic) {
-      doc.text('معلومات الطالب', { align: 'right' });
-    } else {
-      doc.text('Student Information');
-    }
-    doc.moveDown(0.3);
+    doc.text(
+      ar ? fixArabic('معلومات الطالب') : 'Student Information',
+      { align: ar ? 'right' : 'left' }
+    );
+    doc.moveDown(0.4);
 
     doc.fontSize(11).font(fontR);
 
-    if (fonts.hasArabic) {
-      doc.text('الاسم الكامل:  ' + (student.fullName || ''), { align: 'right' });
-      doc.text('رقم الطالب:  ' + (student.studentId || ''), { align: 'right' });
-      doc.text('الفئة:  ' + (student.category || ''), { align: 'right' });
-      doc.text('الهاتف:  ' + (student.phone || ''), { align: 'right' });
-      doc.text('العنوان:  ' + (student.address || ''), { align: 'right' });
-      doc.text('البريد الإلكتروني:  ' + (student.email || ''), { align: 'right' });
+    if (ar) {
+      // بنكتب label عربي معكوس + القيمة بالانجليزي
+      var infoLines = [
+        { label: 'الاسم الكامل', value: student.fullName || '' },
+        { label: 'رقم الطالب', value: student.studentId || '' },
+        { label: 'الفئة', value: student.category || '' },
+        { label: 'الهاتف', value: student.phone || '' },
+        { label: 'العنوان', value: fixArabic(student.address || '') },
+        { label: 'البريد الإلكتروني', value: student.email || '' }
+      ];
+
+      for (var ii = 0; ii < infoLines.length; ii++) {
+        var line = infoLines[ii];
+        // القيمة + : + اللابل المعكوس
+        doc.text(
+          line.value + '  :' + fixArabic(line.label),
+          { align: 'right' }
+        );
+      }
     } else {
       doc.text('Full Name: ' + (student.fullName || ''));
       doc.text('Student ID: ' + (student.studentId || ''));
@@ -153,21 +180,25 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
       doc.text('Email: ' + (student.email || ''));
     }
 
-    doc.moveDown(0.4);
+    doc.moveDown(0.5);
     doc.moveTo(40, doc.y).lineTo(555, doc.y).lineWidth(1).stroke('#bbb');
     doc.moveDown(0.6);
 
     // ============================================
-    // EXAMS
+    // EXAMS TITLE
     // ============================================
     doc.fontSize(14).font(fontB);
-    if (fonts.hasArabic) {
-      doc.text('نتائج الامتحانات — آخر ' + exams.length, { align: 'right' });
-    } else {
-      doc.text('Last ' + exams.length + ' Exam Results');
-    }
+    doc.text(
+      ar
+        ? fixArabic('نتائج الامتحانات') + ' — ' + fixArabic('آخر') + ' ' + exams.length
+        : 'Last ' + exams.length + ' Exam Results',
+      { align: ar ? 'right' : 'left' }
+    );
     doc.moveDown(0.5);
 
+    // ============================================
+    // EXAM CARDS
+    // ============================================
     for (var e = 0; e < exams.length; e++) {
       var exam = exams[e];
 
@@ -177,78 +208,81 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
       var bgColor = exam.passed ? '#e8f5e9' : '#ffebee';
       var borderClr = exam.passed ? '#4caf50' : '#f44336';
 
-      // Card background
       doc.save();
-      doc.roundedRect(40, cardY, 515, 130, 8).fill(bgColor);
-      doc.roundedRect(40, cardY, 515, 130, 8).lineWidth(2).stroke(borderClr);
+      doc.roundedRect(40, cardY, 515, 135, 8).fill(bgColor);
+      doc.roundedRect(40, cardY, 515, 135, 8).lineWidth(2).stroke(borderClr);
       doc.restore();
 
-      // Exam number
       doc.fillColor('#333');
-      doc.fontSize(13).font(fontB);
 
-      if (fonts.hasArabic) {
-        doc.text('الامتحان ' + (e + 1), 55, cardY + 10, { width: 490, align: 'right' });
-      } else {
-        doc.text('Exam #' + (e + 1), 55, cardY + 10);
-      }
+      // Exam number
+      doc.fontSize(13).font(fontB);
+      doc.text(
+        ar ? fixArabic('الامتحان') + ' ' + (e + 1) : 'Exam #' + (e + 1),
+        55, cardY + 10,
+        { width: 490, align: ar ? 'right' : 'left' }
+      );
 
       // Date & Time
       doc.fontSize(10).font(fontR).fillColor('#555');
-
-      if (fonts.hasArabic) {
+      if (ar) {
         doc.text(
-          'التاريخ: ' + formatDateAr(exam.createdAt) + '    —    الوقت: ' + formatTimeAr(exam.createdAt),
-          55, cardY + 28,
+          formatTimeAr(exam.createdAt) + '  —  ' + fixArabic('الوقت') + ':' +
+          '      ' +
+          fixArabic(formatDateAr(exam.createdAt)) + '  :' + fixArabic('التاريخ'),
+          55, cardY + 30,
           { width: 490, align: 'right' }
         );
       } else {
         doc.text(
           'Date: ' + formatDateAr(exam.createdAt) + '   |   Time: ' + formatTimeAr(exam.createdAt),
-          55, cardY + 28
+          55, cardY + 30,
+          { width: 490, align: 'left' }
         );
       }
 
-      // Type
-      doc.fontSize(10).font(fontR).fillColor('#555');
-      var typeAr = exam.type === 'exam' ? 'امتحان رسمي' : 'اختبار تجريبي';
+      // Category & Type
+      var typeAr = exam.type === 'exam' ? fixArabic('امتحان رسمي') : fixArabic('اختبار تجريبي');
       var typeEn = exam.type === 'exam' ? 'Official Exam' : 'Practice Test';
 
-      if (fonts.hasArabic) {
+      doc.fontSize(10).font(fontR).fillColor('#555');
+      if (ar) {
         doc.text(
-          'الفئة: ' + exam.category + '    —    النوع: ' + typeAr,
-          55, cardY + 43,
+          typeAr + '  —  ' + fixArabic('النوع') + ':' +
+          '      ' +
+          exam.category + '  :' + fixArabic('الفئة'),
+          55, cardY + 45,
           { width: 490, align: 'right' }
         );
       } else {
         doc.text(
           'Category: ' + exam.category + '   |   Type: ' + typeEn,
-          55, cardY + 43
+          55, cardY + 45,
+          { width: 490, align: 'left' }
         );
       }
 
-      // Score - BIG
-      doc.fontSize(32).font(fontB);
+      // Score BIG
+      doc.fontSize(30).font(fontB);
       doc.fillColor(exam.passed ? '#2e7d32' : '#c62828');
       doc.text(
         exam.correctAnswers + ' / ' + exam.totalQuestions,
-        55, cardY + 60,
+        55, cardY + 62,
         { width: 490, align: 'center' }
       );
 
       // Result
-      doc.fontSize(18).font(fontB);
-
-      if (fonts.hasArabic) {
+      doc.fontSize(16).font(fontB);
+      if (ar) {
         doc.text(
-          exam.passed ? '✓ ناجح' : '✗ راسب',
-          55, cardY + 95,
+          exam.passed ? fixArabic('ناجح') + ' ✓' : fixArabic('راسب') + ' ✗',
+          55, cardY + 97,
           { width: 490, align: 'center' }
         );
       } else {
         doc.text(
-          exam.passed ? 'PASSED' : 'FAILED',
-          55, cardY + 95,
+          exam.passed ? '✓ PASSED' : '✗ FAILED',
+          55, cardY + 97,
           { width: 490, align: 'center' }
         );
       }
@@ -257,23 +291,22 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
       var mins = Math.floor((exam.timeTaken || 0) / 60);
       var secs = (exam.timeTaken || 0) % 60;
       doc.fontSize(9).font(fontR).fillColor('#888');
-
-      if (fonts.hasArabic) {
+      if (ar) {
         doc.text(
-          'المدة: ' + mins + ' دقيقة و ' + secs + ' ثانية',
-          55, cardY + 115,
+          fixArabic('ثانية') + ' ' + secs + ' ' + fixArabic('دقيقة و') + ' ' + mins + '  :' + fixArabic('المدة'),
+          55, cardY + 118,
           { width: 490, align: 'center' }
         );
       } else {
         doc.text(
           'Duration: ' + mins + 'm ' + secs + 's',
-          55, cardY + 115,
+          55, cardY + 118,
           { width: 490, align: 'center' }
         );
       }
 
       doc.fillColor('#000');
-      doc.y = cardY + 145;
+      doc.y = cardY + 150;
     }
 
     // ============================================
@@ -282,7 +315,6 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
     doc.moveDown(1);
     doc.moveTo(40, doc.y).lineTo(555, doc.y).lineWidth(1).stroke('#ccc');
     doc.moveDown(0.3);
-
     doc.fontSize(8).font(fontR).fillColor('#aaa');
     doc.text(
       'Generated: ' + new Date().toLocaleString(),
@@ -291,12 +323,16 @@ router.get('/student-pdf/:studentId', auth, async function(req, res) {
     );
 
     doc.end();
+
   } catch (err) {
     console.log('STUDENT PDF ERROR:', err.message);
     res.status(500).json({ message: err.message });
   }
 });
 
+// ============================================
+// ADMIN FULL PDF - ما تغير شي
+// ============================================
 router.get('/admin-full-pdf', auth, async function(req, res) {
   try {
     var schools = await User.find({ role: 'school' }).select('-password');
@@ -358,6 +394,9 @@ router.get('/admin-full-pdf', auth, async function(req, res) {
   }
 });
 
+// ============================================
+// EXAM PDF - ما تغير شي
+// ============================================
 router.get('/exam-pdf/:examId', auth, async function(req, res) {
   try {
     var exam = await Exam.findById(req.params.examId)
