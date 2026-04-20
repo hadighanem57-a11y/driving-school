@@ -25,6 +25,20 @@ const userSchema = new mongoose.Schema({
     default: 'English'
   },
   isActive: { type: Boolean, default: true },
+  status: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'approved'
+  },
+  paymentReceipt: { type: String },
+  paymentMethod: {
+    type: String,
+    enum: ['OMT', 'Whish', 'Cash', 'Other']
+  },
+  paymentAmount: { type: Number },
+  approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  approvedAt: { type: Date },
+  rejectionReason: { type: String },
   createdAt: { type: Date, default: Date.now }
 });
 
