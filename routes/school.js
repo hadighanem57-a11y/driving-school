@@ -11,8 +11,18 @@ router.get('/stats', auth, authorize('school'), async function(req, res) {
   try {
     var schoolId = req.user._id;
 
-    var totalStudents = await User.countDocuments({ role: 'student', schoolId: schoolId, status: 'approved' });
-    var pendingStudents = await User.countDocuments({ role: 'student', schoolId: schoolId, status: 'pending' });
+    var totalStudents = await User.countDocuments({
+      role: 'student',
+      schoolId: schoolId,
+      status: 'approved'
+    });
+
+    var pendingStudents = await User.countDocuments({
+      role: 'student',
+      schoolId: schoolId,
+      status: 'pending'
+    });
+
     var totalExams = await Exam.countDocuments({ schoolId: schoolId });
     var passedExams = await Exam.countDocuments({ schoolId: schoolId, passed: true });
 
@@ -26,6 +36,7 @@ router.get('/stats', auth, authorize('school'), async function(req, res) {
         category: categories[i],
         status: 'approved'
       });
+
       if (count > 0) {
         categoryStats.push({ category: categories[i], count: count });
       }
@@ -44,7 +55,7 @@ router.get('/stats', auth, authorize('school'), async function(req, res) {
   }
 });
 
-// ✅ ADD STUDENT - WITH PAYMENT
+// ✅ ADD STUDENT - WITH PAYMENT + FIXED EMAIL DOMAIN
 router.post('/add-student', auth, authorize('school'), async function(req, res) {
   try {
     console.log('=== ADD STUDENT START ===');
@@ -56,15 +67,48 @@ router.post('/add-student', auth, authorize('school'), async function(req, res) 
     var address = req.body.address;
     var category = req.body.category;
     var rawLanguage = req.body.language;
-    var email = req.body.email;
     var password = req.body.password;
     var paymentReceipt = req.body.paymentReceipt;
     var paymentMethod = req.body.paymentMethod;
 
+    // ✅ Email handling
+    var rawEmail = String(req.body.email || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '');
+
+    var email = rawEmail;
+
+    // إذا بعت prefix فقط
+    if (rawEmail && rawEmail.indexOf('@') === -1) {
+      email = rawEmail + '@drivingschool.com';
+    }
+
+    // لازم ينتهي بهيدا الدومين فقط
+    if (email && !email.endsWith('@drivingschool.com')) {
+      return res.status(400).json({
+        message: 'Student email must end with @drivingschool.com'
+      });
+    }
+
+    // validation أبسط للايميل
+    var emailRegex = /^[a-z0-9._-]+@drivingschool\.com$/;
+    if (email && !emailRegex.test(email)) {
+      return res.status(400).json({
+        message: 'Invalid student email format. Use only letters, numbers, dot, underscore or dash before @drivingschool.com'
+      });
+    }
+
     var languageMap = {
-      en: 'English', ar: 'Arabic', fr: 'French',
-      english: 'English', arabic: 'Arabic', french: 'French',
-      English: 'English', Arabic: 'Arabic', French: 'French'
+      en: 'English',
+      ar: 'Arabic',
+      fr: 'French',
+      english: 'English',
+      arabic: 'Arabic',
+      french: 'French',
+      English: 'English',
+      Arabic: 'Arabic',
+      French: 'French'
     };
 
     var language = languageMap[rawLanguage];
@@ -119,7 +163,7 @@ router.post('/add-student', auth, authorize('school'), async function(req, res) 
       paymentAmount: 5
     });
 
-    console.log('STUDENT CREATED (PENDING):', student._id, student.fullName);
+    console.log('STUDENT CREATED (PENDING):', student._id, student.fullName, student.email);
 
     res.status(201).json({
       message: 'Student added - waiting for admin approval',
@@ -128,23 +172,25 @@ router.post('/add-student', auth, authorize('school'), async function(req, res) 
         fullName: student.fullName,
         category: student.category,
         language: student.language,
+        email: student.email,
         status: 'pending'
       }
     });
-
   } catch (err) {
     console.log('=== ADD STUDENT ERROR ===');
     console.log('ERROR:', err.message);
+
     if (err.code === 11000) {
       return res.status(400).json({
         message: 'Duplicate entry: ' + JSON.stringify(err.keyValue)
       });
     }
+
     res.status(500).json({ message: err.message });
   }
 });
 
-// ✅ GET ALL STUDENTS (approved + pending)
+// ✅ GET ALL STUDENTS (approved + pending + rejected)
 router.get('/students', auth, authorize('school'), async function(req, res) {
   try {
     var students = await User.find({
@@ -196,6 +242,7 @@ router.put('/student/:id', auth, authorize('school'), async function(req, res) {
     }
 
     var update = {};
+
     if (req.body.fullName) update.fullName = req.body.fullName;
     if (req.body.phone) update.phone = req.body.phone;
     if (req.body.address) update.address = req.body.address;
@@ -203,14 +250,22 @@ router.put('/student/:id', auth, authorize('school'), async function(req, res) {
 
     if (req.body.language) {
       var languageMap = {
-        en: 'English', ar: 'Arabic', fr: 'French',
-        english: 'English', arabic: 'Arabic', french: 'French',
-        English: 'English', Arabic: 'Arabic', French: 'French'
+        en: 'English',
+        ar: 'Arabic',
+        fr: 'French',
+        english: 'English',
+        arabic: 'Arabic',
+        french: 'French',
+        English: 'English',
+        Arabic: 'Arabic',
+        French: 'French'
       };
+
       var mappedLanguage = languageMap[req.body.language];
       if (!mappedLanguage) {
         return res.status(400).json({ message: 'Invalid language value: ' + req.body.language });
       }
+
       update.language = mappedLanguage;
     }
 
