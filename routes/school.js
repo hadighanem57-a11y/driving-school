@@ -11,7 +11,8 @@ router.get('/stats', auth, authorize('school'), async function(req, res) {
   try {
     var schoolId = req.user._id;
 
-    var totalStudents = await User.countDocuments({ role: 'student', schoolId: schoolId });
+    var totalStudents = await User.countDocuments({ role: 'student', schoolId: schoolId, status: 'approved' });
+    var pendingStudents = await User.countDocuments({ role: 'student', schoolId: schoolId, status: 'pending' });
     var totalExams = await Exam.countDocuments({ schoolId: schoolId });
     var passedExams = await Exam.countDocuments({ schoolId: schoolId, passed: true });
 
@@ -22,7 +23,8 @@ router.get('/stats', auth, authorize('school'), async function(req, res) {
       var count = await User.countDocuments({
         role: 'student',
         schoolId: schoolId,
-        category: categories[i]
+        category: categories[i],
+        status: 'approved'
       });
       if (count > 0) {
         categoryStats.push({ category: categories[i], count: count });
@@ -31,6 +33,7 @@ router.get('/stats', auth, authorize('school'), async function(req, res) {
 
     res.json({
       totalStudents: totalStudents,
+      pendingStudents: pendingStudents,
       totalExams: totalExams,
       passedExams: passedExams,
       categoryStats: categoryStats
@@ -41,13 +44,11 @@ router.get('/stats', auth, authorize('school'), async function(req, res) {
   }
 });
 
-// ✅ ADD STUDENT - WITH FULL DEBUG LOGGING
+// ✅ ADD STUDENT - WITH PAYMENT
 router.post('/add-student', auth, authorize('school'), async function(req, res) {
   try {
     console.log('=== ADD STUDENT START ===');
     console.log('BODY:', JSON.stringify(req.body));
-    console.log('USER ID:', req.user._id);
-    console.log('USER ROLE:', req.user.role);
 
     var fullName = req.body.fullName;
     var phone = req.body.phone;
@@ -57,63 +58,41 @@ router.post('/add-student', auth, authorize('school'), async function(req, res) 
     var rawLanguage = req.body.language;
     var email = req.body.email;
     var password = req.body.password;
+    var paymentReceipt = req.body.paymentReceipt;
+    var paymentMethod = req.body.paymentMethod;
 
-    // Language mapping - accept both codes and full names
     var languageMap = {
-      en: 'English',
-      ar: 'Arabic',
-      fr: 'French',
-      english: 'English',
-      arabic: 'Arabic',
-      french: 'French',
-      English: 'English',
-      Arabic: 'Arabic',
-      French: 'French'
+      en: 'English', ar: 'Arabic', fr: 'French',
+      english: 'English', arabic: 'Arabic', french: 'French',
+      English: 'English', Arabic: 'Arabic', French: 'French'
     };
 
     var language = languageMap[rawLanguage];
 
     if (!fullName || !phone || !studentId || !address || !category || !rawLanguage || !email || !password) {
-      console.log('MISSING FIELDS:', {
-        fullName: !!fullName,
-        phone: !!phone,
-        studentId: !!studentId,
-        address: !!address,
-        category: !!category,
-        language: !!rawLanguage,
-        email: !!email,
-        password: !!password
-      });
       return res.status(400).json({
-        message: 'ALL fields required: fullName, phone, studentId, address, category, language, email, password',
-        received: {
-          fullName: !!fullName,
-          phone: !!phone,
-          studentId: !!studentId,
-          address: !!address,
-          category: !!category,
-          language: rawLanguage,
-          email: !!email,
-          password: password ? 'provided' : 'missing'
-        }
+        message: 'ALL fields required: fullName, phone, studentId, address, category, language, email, password'
+      });
+    }
+
+    if (!paymentReceipt || !paymentMethod) {
+      return res.status(400).json({
+        message: 'Payment receipt number and payment method are required'
       });
     }
 
     if (!language) {
-      console.log('INVALID LANGUAGE:', rawLanguage);
       return res.status(400).json({
-        message: 'Invalid language: ' + rawLanguage + '. Allowed: English, Arabic, French, en, ar, fr'
+        message: 'Invalid language: ' + rawLanguage
       });
     }
 
-    // Check duplicate
     var exists = await User.findOne({
       $or: [{ email: email }, { studentId: studentId }]
     });
 
     if (exists) {
       var conflictField = exists.email === email ? 'email' : 'studentId';
-      console.log('DUPLICATE FOUND:', conflictField, '=', conflictField === 'email' ? email : studentId);
       return res.status(400).json({
         message: 'Email or Student ID already exists',
         conflictField: conflictField
@@ -133,45 +112,39 @@ router.post('/add-student', auth, authorize('school'), async function(req, res) 
       password: hashed,
       role: 'student',
       schoolId: req.user._id,
-      isActive: true
+      isActive: false,
+      status: 'pending',
+      paymentReceipt: paymentReceipt,
+      paymentMethod: paymentMethod,
+      paymentAmount: 5
     });
 
-    console.log('STUDENT CREATED OK:', student._id, student.fullName);
+    console.log('STUDENT CREATED (PENDING):', student._id, student.fullName);
 
     res.status(201).json({
-      message: 'Student added',
+      message: 'Student added - waiting for admin approval',
       student: {
         id: student._id,
         fullName: student.fullName,
         category: student.category,
-        language: student.language
+        language: student.language,
+        status: 'pending'
       }
     });
 
   } catch (err) {
     console.log('=== ADD STUDENT ERROR ===');
-    console.log('ERROR NAME:', err.name);
-    console.log('ERROR MSG:', err.message);
-    if (err.errors) {
-      console.log('VALIDATION ERRORS:', JSON.stringify(err.errors));
-    }
+    console.log('ERROR:', err.message);
     if (err.code === 11000) {
-      console.log('DUPLICATE KEY:', JSON.stringify(err.keyValue));
       return res.status(400).json({
         message: 'Duplicate entry: ' + JSON.stringify(err.keyValue)
       });
     }
-    res.status(500).json({
-      message: err.message,
-      errorName: err.name,
-      details: err.errors ? Object.keys(err.errors).map(function(k) {
-        return k + ': ' + err.errors[k].message;
-      }) : null
-    });
+    res.status(500).json({ message: err.message });
   }
 });
 
-// ✅ GET ALL STUDENTS
+// ✅ GET ALL STUDENTS (approved + pending)
 router.get('/students', auth, authorize('school'), async function(req, res) {
   try {
     var students = await User.find({
@@ -215,7 +188,7 @@ router.get('/student/:id', auth, authorize('school'), async function(req, res) {
   }
 });
 
-// ✅ EDIT STUDENT - WITH LANGUAGE MAPPING
+// ✅ EDIT STUDENT
 router.put('/student/:id', auth, authorize('school'), async function(req, res) {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
@@ -230,25 +203,16 @@ router.put('/student/:id', auth, authorize('school'), async function(req, res) {
 
     if (req.body.language) {
       var languageMap = {
-        en: 'English',
-        ar: 'Arabic',
-        fr: 'French',
-        english: 'English',
-        arabic: 'Arabic',
-        french: 'French',
-        English: 'English',
-        Arabic: 'Arabic',
-        French: 'French'
+        en: 'English', ar: 'Arabic', fr: 'French',
+        english: 'English', arabic: 'Arabic', french: 'French',
+        English: 'English', Arabic: 'Arabic', French: 'French'
       };
-
       var mappedLanguage = languageMap[req.body.language];
       if (!mappedLanguage) {
         return res.status(400).json({ message: 'Invalid language value: ' + req.body.language });
       }
       update.language = mappedLanguage;
     }
-
-    console.log('EDIT STUDENT:', req.params.id, 'UPDATE:', JSON.stringify(update));
 
     var student = await User.findOneAndUpdate(
       { _id: req.params.id, role: 'student', schoolId: req.user._id },
@@ -267,14 +231,13 @@ router.put('/student/:id', auth, authorize('school'), async function(req, res) {
   }
 });
 
-// ✅ DELETE STUDENT - SECURED
+// ✅ DELETE STUDENT
 router.delete('/student/:id', auth, authorize('school'), async function(req, res) {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ message: 'Invalid student ID' });
     }
 
-    // Make sure student belongs to this school
     var student = await User.findOne({
       _id: req.params.id,
       role: 'student',
