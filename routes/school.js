@@ -55,12 +55,11 @@ router.get('/stats', auth, authorize('school'), async function(req, res) {
   }
 });
 
-// ✅ ADD STUDENT - WITH PAYMENT + FIXED EMAIL DOMAIN
+// ✅ ADD STUDENT - (MODIFIED: PAYMENT BYPASSED FOR TESTING)
 router.post('/add-student', auth, authorize('school'), async function(req, res) {
   try {
-    console.log('=== ADD STUDENT START ===');
-    console.log('BODY:', JSON.stringify(req.body));
-
+    console.log('=== ADD STUDENT START (TESTING MODE) ===');
+    
     var fullName = req.body.fullName;
     var phone = req.body.phone;
     var studentId = req.body.studentId;
@@ -68,8 +67,10 @@ router.post('/add-student', auth, authorize('school'), async function(req, res) 
     var category = req.body.category;
     var rawLanguage = req.body.language;
     var password = req.body.password;
-    var paymentReceipt = req.body.paymentReceipt;
-    var paymentMethod = req.body.paymentMethod;
+    
+    // Payment fields - made optional for testing
+    var paymentReceipt = req.body.paymentReceipt || 'TEST-FREE';
+    var paymentMethod = req.body.paymentMethod || 'FREE';
 
     // ✅ Email handling
     var rawEmail = String(req.body.email || '')
@@ -78,57 +79,42 @@ router.post('/add-student', auth, authorize('school'), async function(req, res) 
       .replace(/\s+/g, '');
 
     var email = rawEmail;
-
-    // إذا بعت prefix فقط
     if (rawEmail && rawEmail.indexOf('@') === -1) {
       email = rawEmail + '@drivingschool.com';
     }
 
-    // لازم ينتهي بهيدا الدومين فقط
     if (email && !email.endsWith('@drivingschool.com')) {
       return res.status(400).json({
         message: 'Student email must end with @drivingschool.com'
       });
     }
 
-    // validation أبسط للايميل
     var emailRegex = /^[a-z0-9._-]+@drivingschool\.com$/;
     if (email && !emailRegex.test(email)) {
       return res.status(400).json({
-        message: 'Invalid student email format. Use only letters, numbers, dot, underscore or dash before @drivingschool.com'
+        message: 'Invalid student email format.'
       });
     }
 
     var languageMap = {
-      en: 'English',
-      ar: 'Arabic',
-      fr: 'French',
-      english: 'English',
-      arabic: 'Arabic',
-      french: 'French',
-      English: 'English',
-      Arabic: 'Arabic',
-      French: 'French'
+      en: 'English', ar: 'Arabic', fr: 'French',
+      english: 'English', arabic: 'Arabic', french: 'French',
+      English: 'English', Arabic: 'Arabic', French: 'French'
     };
 
     var language = languageMap[rawLanguage];
 
     if (!fullName || !phone || !studentId || !address || !category || !rawLanguage || !email || !password) {
       return res.status(400).json({
-        message: 'ALL fields required: fullName, phone, studentId, address, category, language, email, password'
+        message: 'Missing required fields (fullName, phone, studentId, address, category, language, email, password)'
       });
     }
 
-    if (!paymentReceipt || !paymentMethod) {
-      return res.status(400).json({
-        message: 'Payment receipt number and payment method are required'
-      });
-    }
+    // --- PAYMENT VALIDATION BYPASSED ---
+    // if (!paymentReceipt || !paymentMethod) { ... }
 
     if (!language) {
-      return res.status(400).json({
-        message: 'Invalid language: ' + rawLanguage
-      });
+      return res.status(400).json({ message: 'Invalid language: ' + rawLanguage });
     }
 
     var exists = await User.findOne({
@@ -145,6 +131,7 @@ router.post('/add-student', auth, authorize('school'), async function(req, res) 
 
     var hashed = await bcrypt.hash(password, 10);
 
+    // ✅ Create student as APPROVED and ACTIVE immediately for testing
     var student = await User.create({
       fullName: fullName,
       phone: phone,
@@ -156,41 +143,33 @@ router.post('/add-student', auth, authorize('school'), async function(req, res) 
       password: hashed,
       role: 'student',
       schoolId: req.user._id,
-      isActive: false,
-      status: 'pending',
+      isActive: true,        // Set to true for testing
+      status: 'approved',    // Set to approved for testing
       paymentReceipt: paymentReceipt,
       paymentMethod: paymentMethod,
-      paymentAmount: 5
+      paymentAmount: 0       // Set price to 0
     });
 
-    console.log('STUDENT CREATED (PENDING):', student._id, student.fullName, student.email);
+    console.log('STUDENT CREATED (AUTO-APPROVED):', student.email);
 
     res.status(201).json({
-      message: 'Student added - waiting for admin approval',
+      message: 'Student added successfully (Free Testing Mode)',
       student: {
         id: student._id,
         fullName: student.fullName,
         category: student.category,
         language: student.language,
         email: student.email,
-        status: 'pending'
+        status: 'approved'
       }
     });
   } catch (err) {
-    console.log('=== ADD STUDENT ERROR ===');
-    console.log('ERROR:', err.message);
-
-    if (err.code === 11000) {
-      return res.status(400).json({
-        message: 'Duplicate entry: ' + JSON.stringify(err.keyValue)
-      });
-    }
-
+    console.log('=== ADD STUDENT ERROR ===', err.message);
     res.status(500).json({ message: err.message });
   }
 });
 
-// ✅ GET ALL STUDENTS (approved + pending + rejected)
+// ✅ GET ALL STUDENTS
 router.get('/students', auth, authorize('school'), async function(req, res) {
   try {
     var students = await User.find({
@@ -200,7 +179,6 @@ router.get('/students', auth, authorize('school'), async function(req, res) {
 
     res.json(students);
   } catch (err) {
-    console.log('GET STUDENTS ERROR:', err.message);
     res.status(500).json({ message: err.message });
   }
 });
@@ -229,7 +207,6 @@ router.get('/student/:id', auth, authorize('school'), async function(req, res) {
 
     res.json({ student: student, exams: exams });
   } catch (err) {
-    console.log('GET STUDENT ERROR:', err.message);
     res.status(500).json({ message: err.message });
   }
 });
@@ -242,7 +219,6 @@ router.put('/student/:id', auth, authorize('school'), async function(req, res) {
     }
 
     var update = {};
-
     if (req.body.fullName) update.fullName = req.body.fullName;
     if (req.body.phone) update.phone = req.body.phone;
     if (req.body.address) update.address = req.body.address;
@@ -250,23 +226,11 @@ router.put('/student/:id', auth, authorize('school'), async function(req, res) {
 
     if (req.body.language) {
       var languageMap = {
-        en: 'English',
-        ar: 'Arabic',
-        fr: 'French',
-        english: 'English',
-        arabic: 'Arabic',
-        french: 'French',
-        English: 'English',
-        Arabic: 'Arabic',
-        French: 'French'
+        en: 'English', ar: 'Arabic', fr: 'French',
+        english: 'English', arabic: 'Arabic', french: 'French',
+        English: 'English', Arabic: 'Arabic', French: 'French'
       };
-
-      var mappedLanguage = languageMap[req.body.language];
-      if (!mappedLanguage) {
-        return res.status(400).json({ message: 'Invalid language value: ' + req.body.language });
-      }
-
-      update.language = mappedLanguage;
+      update.language = languageMap[req.body.language];
     }
 
     var student = await User.findOneAndUpdate(
@@ -275,13 +239,9 @@ router.put('/student/:id', auth, authorize('school'), async function(req, res) {
       { new: true, runValidators: true }
     ).select('-password');
 
-    if (!student) {
-      return res.status(404).json({ message: 'Student not found' });
-    }
-
+    if (!student) return res.status(404).json({ message: 'Student not found' });
     res.json(student);
   } catch (err) {
-    console.log('EDIT STUDENT ERROR:', err.message);
     res.status(500).json({ message: err.message });
   }
 });
@@ -299,18 +259,13 @@ router.delete('/student/:id', auth, authorize('school'), async function(req, res
       schoolId: req.user._id
     });
 
-    if (!student) {
-      return res.status(404).json({ message: 'Student not found' });
-    }
+    if (!student) return res.status(404).json({ message: 'Student not found' });
 
     await Exam.deleteMany({ studentId: req.params.id });
     await User.findByIdAndDelete(req.params.id);
 
-    console.log('STUDENT DELETED:', req.params.id);
-
     res.json({ message: 'Student deleted' });
   } catch (err) {
-    console.log('DELETE STUDENT ERROR:', err.message);
     res.status(500).json({ message: err.message });
   }
 });
